@@ -14,4 +14,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "metro-voice"
-include(":core")
+include(":core", ":app")

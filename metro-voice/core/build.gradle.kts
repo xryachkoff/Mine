@@ -23,3 +23,12 @@ tasks.test {
     useJUnitPlatform()
     testLogging { events("failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
 }
+
+// ./gradlew :core:cli --args="import-osm data/osm/tbilisi-overpass.json app/src/main/assets/cities/tbilisi.json tbilisi"
+tasks.register<JavaExec>("cli") {
+    group = "metro-voice"
+    description = "Developer tools: import-osm, replay"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("metrovoice.core.tools.CliKt")
+    workingDir = rootDir
+}
