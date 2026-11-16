@@ -16,11 +16,16 @@ data class UiState(
     val lastSaid: String? = null,
     val tripFile: String? = null,
     val missingVoices: Set<String> = emptySet(),
+    /** Station the user is heading to (home / work), may be set before the trip starts. */
+    val destination: String? = null,
 )
 
 sealed interface Command {
     /** User says "I am at this station" — correction for the tracker and ground truth for the log. */
     data class AtStation(val stationId: String) : Command
+
+    /** "Going home / to work" — gives the tracker the direction right away. */
+    data class Destination(val stationId: String?) : Command
 }
 
 /** Process-wide channel between the foreground service and the UI. */

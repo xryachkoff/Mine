@@ -63,6 +63,8 @@ class Tracker(
         val skipStation: Double = 0.05,
         /** Share of weight moved to transfer hypotheses when walking is detected at a transfer station. */
         val transferShare: Double = 0.4,
+        /** Weight factor for hypotheses heading away from the user's destination. */
+        val wrongWayToDestination: Double = 0.02,
         /** Mass of fresh hypotheses mixed in on every fix, for recovery from earlier mistakes. */
         val reseedMass: Double = 0.05,
         val pruneBelow: Double = 1e-4,
@@ -71,12 +73,26 @@ class Tracker(
 
     private var hypotheses: List<Hypothesis> = emptyList()
 
+    /** Station the user is heading to ("home", "work"), possibly on another line. */
+    var destination: String? = null
+        private set
+
     val isTracking: Boolean get() = hypotheses.isNotEmpty()
 
     fun hypotheses(): List<Hypothesis> = hypotheses
 
     fun reset() {
         hypotheses = emptyList()
+        destination = null
+    }
+
+    /**
+     * Destination known (e.g. "going home"): hypotheses heading away from it are strongly down-weighted.
+     * Soft, not a hard filter, so a wrong destination cannot make the tracker blind.
+     */
+    fun setDestination(stationId: String?) {
+        destination = stationId
+        if (stationId != null && hypotheses.isNotEmpty()) hypotheses = normalize(hypotheses.map(::applyDestination))
     }
 
     /** User says "I am at station X" (tap on the line strip). Direction stays unknown unless given. */
@@ -90,14 +106,13 @@ class Tracker(
                 seeded += Hypothesis(line.id, Position.At(i), d, 1.0)
             }
         }
-        hypotheses = normalize(seeded)
+        hypotheses = normalize(seeded.map(::applyDestination))
     }
 
     /** User says "I am going towards X" (destination or terminus). Keeps only consistent hypotheses. */
     fun setDirectionTowards(stationId: String) {
         val kept = hypotheses.filter { h ->
-            val i = when (val p = h.position) { is Position.At -> p.index; is Position.Between -> p.from }
-            isTowards(h.lineId, i, h.direction, stationId)
+            isTowards(h.lineId, baseIndex(h), h.direction, stationId)
         }
         if (kept.isNotEmpty()) hypotheses = normalize(kept)
     }
@@ -106,7 +121,7 @@ class Tracker(
     fun onFix(lat: Double, lon: Double, accuracyMeters: Double, trainMoving: Boolean) {
         if (trainMoving) return
         val sigma = max(accuracyMeters, config.minFixSigmaMeters)
-        val fresh = seedFromFix(lat, lon, sigma)
+        val fresh = seedFromFix(lat, lon, sigma).map(::applyDestination)
         if (fresh.isEmpty()) return
         if (hypotheses.isEmpty()) {
             hypotheses = normalize(fresh)
@@ -243,8 +258,30 @@ class Tracker(
         listOf(1, -1).filter { network.isValidIndex(lineId, i + it) }
 
     private fun isTowards(lineId: String, i: Int, direction: Int, targetId: String): Boolean {
-        val j = network.line(lineId).stations.indexOf(targetId)
-        return j >= 0 && j != i && (j - i) * direction > 0
+        val j = targetIndex(lineId, targetId) ?: return false
+        return j != i && (j - i) * direction > 0
+    }
+
+    private fun baseIndex(h: Hypothesis): Int = when (val p = h.position) {
+        is Position.At -> p.index
+        is Position.Between -> p.from
+    }
+
+    /** Index of [targetId] on [lineId], or of the transfer station leading to the target's line. */
+    private fun targetIndex(lineId: String, targetId: String): Int? {
+        val stations = network.line(lineId).stations
+        stations.indexOf(targetId).takeIf { it >= 0 }?.let { return it }
+        val targetLines = network.lines.filter { targetId in it.stations }.map { it.id }.toSet()
+        return stations.indexOfFirst { sid -> network.transferLines(lineId, sid).any { it.id in targetLines } }
+            .takeIf { it >= 0 }
+    }
+
+    private fun applyDestination(h: Hypothesis): Hypothesis {
+        val dest = destination ?: return h
+        val j = targetIndex(h.lineId, dest) ?: return h
+        val i = baseIndex(h)
+        if (j == i) return h
+        return if ((j - i) * h.direction > 0) h else h.copy(weight = h.weight * config.wrongWayToDestination)
     }
 
     private fun distToStation(lineId: String, index: Int, lat: Double, lon: Double): Double {

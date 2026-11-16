@@ -116,7 +116,9 @@ class TripService : LifecycleService() {
 
         handler.post {
             trace?.write(TraceRecord.Meta(0.0, net.graph.city, "${Build.MANUFACTURER} ${Build.MODEL} API ${Build.VERSION.SDK_INT}", "0.1.0"))
-            engine = TripEngine(net, listOf("ru", "en"), listener = EngineListener())
+            engine = TripEngine(net, listOf("ru", "en"), listener = EngineListener()).also { e ->
+                TripBus.state.value.destination?.let(e::setDestination)
+            }
         }
 
         registerSensors()
@@ -132,11 +134,12 @@ class TripService : LifecycleService() {
                             trace?.write(TraceRecord.Label(now(), cmd.stationId))
                             engine?.setStation(cmd.stationId)
                         }
+                        is Command.Destination -> engine?.setDestination(cmd.stationId)
                     }
                 }
             }
         }
-        TripBus.update { UiState(running = true, tripFile = file.absolutePath) }
+        TripBus.update { UiState(running = true, tripFile = file.absolutePath, destination = it.destination) }
     }
 
     override fun onDestroy() {

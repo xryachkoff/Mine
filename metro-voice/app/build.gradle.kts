@@ -4,6 +4,13 @@ plugins {
     id("com.android.application")
     kotlin("android")
     kotlin("plugin.compose")
+    id("io.github.takahirom.roborazzi")
+}
+
+// Firebase (Google / Apple sign-in) is configured by dropping app/google-services.json in place.
+// Without it the app builds and runs in guest mode.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }
 
 android {
@@ -14,8 +21,18 @@ android {
         applicationId = "metrovoice.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
+    }
+
+    // Shared debug key so the SHA-1 registered in Firebase stays the same across machines.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
@@ -30,6 +47,13 @@ android {
     }
 
     buildFeatures { compose = true }
+
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+            all { it.systemProperty("robolectric.pixelCopyRenderMode", "hardware") }
+        }
+    }
 }
 
 kotlin {
@@ -53,4 +77,21 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    implementation("androidx.compose.material:material-icons-core")
+
+    // Sign-in: Firebase Auth for Google + Apple, Credential Manager for the Google account picker.
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
+
+    // Screenshots of the UI rendered on the JVM (Robolectric + Roborazzi), no emulator needed.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi:1.32.2")
+    testImplementation("io.github.takahirom.roborazzi:roborazzi-compose:1.32.2")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

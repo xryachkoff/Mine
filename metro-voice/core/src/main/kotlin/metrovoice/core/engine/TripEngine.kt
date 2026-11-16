@@ -52,6 +52,12 @@ class TripEngine(
         publishStanding()
     }
 
+    /** "Going home / to work": destination may be on another line. Null clears it. */
+    fun setDestination(stationId: String?) {
+        tracker.setDestination(stationId)
+        publishStanding()
+    }
+
     fun setDirectionTowards(stationId: String) {
         tracker.setDirectionTowards(stationId)
         publishStanding()

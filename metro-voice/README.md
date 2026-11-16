@@ -21,6 +21,22 @@
 ./gradlew :app:assembleDebug         # APK: app/build/outputs/apk/debug/app-debug.apk
 ```
 
+## Вход и профиль
+
+Вход через Google и Apple — Firebase Authentication, настройка: [docs/AUTH_SETUP.md](docs/AUTH_SETUP.md). Без неё приложение работает в гостевом режиме. Профиль (станции «дом» и «работа») хранится на телефоне.
+
+## Скриншоты
+
+Рендерятся из настоящего Compose-кода на JVM (Robolectric + Roborazzi), без эмулятора:
+
+```bash
+./gradlew :app:recordRoborazziDebug   # → docs/screenshots/*.png
+```
+
+| | | |
+|---|---|---|
+| ![](docs/screenshots/1-welcome.png) | ![](docs/screenshots/3-trip-riding.png) | ![](docs/screenshots/5-profile.png) |
+
 ## Данные города
 
 1. Выгрузка из [overpass-turbo.eu](https://overpass-turbo.eu): запрос ниже → Export → raw OSM data → `data/osm/tbilisi-overpass.json`.

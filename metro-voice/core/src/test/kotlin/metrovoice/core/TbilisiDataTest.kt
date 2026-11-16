@@ -21,6 +21,18 @@ class TbilisiDataTest {
     }
 
     @Test
+    fun destinationOnOtherLineGivesDirectionImmediately() {
+        val tr = metrovoice.core.tracking.Tracker(network)
+        tr.setDestination("delisi") // Saburtalo line; from line 1 the way goes via Station Square-1
+        val rustaveli = network.station("rustaveli")
+        tr.onFix(rustaveli.lat, rustaveli.lon, 200.0, trainMoving = false)
+        val e = tr.estimate()
+        assertEquals("rustaveli", e.current?.stationId)
+        assertEquals("marjanishvili", e.next?.stationId)
+        assertTrue(e.next!!.probability > 0.85, "next ${e.next}")
+    }
+
+    @Test
     fun rideRustaveliToAvlabari() {
         val said = mutableListOf<Announcement>()
         val engine = TripEngine(network, listOf("ru"), listener = object : TripEngine.Listener {
