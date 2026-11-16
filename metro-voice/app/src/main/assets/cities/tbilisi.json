@@ -1,0 +1,289 @@
+{
+    "city": "tbilisi",
+    "stations": [
+        {
+            "id": "varketili",
+            "name": {
+                "ka": "ვარკეთილი",
+                "en": "Varketili",
+                "ru": "Варкетили"
+            },
+            "lat": 41.6918966,
+            "lon": 44.8708845
+        },
+        {
+            "id": "samgori",
+            "name": {
+                "ka": "სამგორი",
+                "en": "Samgori",
+                "ru": "Самгори"
+            },
+            "lat": 41.6855176,
+            "lon": 44.8544828
+        },
+        {
+            "id": "isani",
+            "name": {
+                "ka": "ისანი",
+                "en": "Isani",
+                "ru": "Исани"
+            },
+            "lat": 41.6866252,
+            "lon": 44.8399633
+        },
+        {
+            "id": "300-aragveli",
+            "name": {
+                "ka": "300 არაგველი",
+                "en": "300 Aragveli",
+                "ru": "300 Арагвели"
+            },
+            "lat": 41.6879948,
+            "lon": 44.8262332
+        },
+        {
+            "id": "avlabari",
+            "name": {
+                "ka": "ავლაბარი",
+                "en": "Avlabari",
+                "ru": "Авлабари"
+            },
+            "lat": 41.6922591,
+            "lon": 44.8158409
+        },
+        {
+            "id": "liberty-square",
+            "name": {
+                "ka": "თავისუფლების მოედანი",
+                "en": "Liberty Square",
+                "ru": "Площадь Свободы"
+            },
+            "lat": 41.6945248,
+            "lon": 44.800563
+        },
+        {
+            "id": "rustaveli",
+            "name": {
+                "ka": "რუსთაველი",
+                "en": "Rustaveli",
+                "ru": "Руставели"
+            },
+            "lat": 41.703497,
+            "lon": 44.7896467
+        },
+        {
+            "id": "marjanishvili",
+            "name": {
+                "ka": "მარჯანიშვილი",
+                "en": "Marjanishvili",
+                "ru": "Марджанишвили"
+            },
+            "lat": 41.7095941,
+            "lon": 44.7968749
+        },
+        {
+            "id": "station-square-1",
+            "name": {
+                "ka": "სადგურის მოედანი-1",
+                "en": "Station Square-1",
+                "ru": "Вокзальная площадь-1"
+            },
+            "lat": 41.7225435,
+            "lon": 44.7977688
+        },
+        {
+            "id": "nadzaledevi",
+            "name": {
+                "ka": "ნაძალადევი",
+                "en": "Nadzaledevi",
+                "ru": "Надзаладеви"
+            },
+            "lat": 41.7334036,
+            "lon": 44.7964257
+        },
+        {
+            "id": "gotsiridze",
+            "name": {
+                "ka": "გოცირიძე",
+                "en": "Gotsiridze",
+                "ru": "Гоциридзе"
+            },
+            "lat": 41.7429401,
+            "lon": 44.7840452
+        },
+        {
+            "id": "didube",
+            "name": {
+                "ka": "დიდუბე",
+                "en": "Didube",
+                "ru": "Дидубе"
+            },
+            "lat": 41.7494522,
+            "lon": 44.779994
+        },
+        {
+            "id": "ghrmaghele",
+            "name": {
+                "ka": "ღრმაღელე",
+                "en": "Ghrmaghele",
+                "ru": "Грмагеле"
+            },
+            "lat": 41.764974,
+            "lon": 44.7899602
+        },
+        {
+            "id": "guramishvili",
+            "name": {
+                "ka": "გურამიშვილი",
+                "en": "Guramishvili",
+                "ru": "Гурамишвили"
+            },
+            "lat": 41.7757645,
+            "lon": 44.7955795
+        },
+        {
+            "id": "sarajishvili",
+            "name": {
+                "ka": "სარაჯიშვილი",
+                "en": "Sarajishvili",
+                "ru": "Сараджишвили"
+            },
+            "lat": 41.7840581,
+            "lon": 44.7999179
+        },
+        {
+            "id": "akhmeteli-theatre",
+            "name": {
+                "ka": "ახმეტელის თეატრი",
+                "en": "Akhmeteli Theatre",
+                "ru": "Театр Ахметели"
+            },
+            "lat": 41.7910558,
+            "lon": 44.8149983
+        },
+        {
+            "id": "state-university",
+            "name": {
+                "ka": "სახელმწიფო უნივერსიტეტი",
+                "en": "State University",
+                "ru": "Государственный университет"
+            },
+            "lat": 41.7228253,
+            "lon": 44.7185112
+        },
+        {
+            "id": "vazha-pshavela",
+            "name": {
+                "ka": "ვაჟა-ფშაველა",
+                "en": "Vazha-Pshavela",
+                "ru": "Важа-Пшавела"
+            },
+            "lat": 41.7240341,
+            "lon": 44.730853
+        },
+        {
+            "id": "delisi",
+            "name": {
+                "ka": "დელისი",
+                "en": "Delisi",
+                "ru": "Делиси"
+            },
+            "lat": 41.7254865,
+            "lon": 44.7453411
+        },
+        {
+            "id": "medical-university",
+            "name": {
+                "ka": "სამედიცინო უნივერსიტეტი",
+                "en": "Medical University",
+                "ru": "Медицинский университет"
+            },
+            "lat": 41.7272794,
+            "lon": 44.7638395
+        },
+        {
+            "id": "technical-university",
+            "name": {
+                "ka": "ტექნიკური უნივერსიტეტი",
+                "en": "Technical University",
+                "ru": "Технический университет"
+            },
+            "lat": 41.7203488,
+            "lon": 44.7766431
+        },
+        {
+            "id": "tsereteli",
+            "name": {
+                "ka": "წერეთელი",
+                "en": "Tsereteli",
+                "ru": "Церетели"
+            },
+            "lat": 41.7264122,
+            "lon": 44.7876612
+        },
+        {
+            "id": "station-square-2",
+            "name": {
+                "ka": "სადგურის მოედანი-2",
+                "en": "Station Square-2",
+                "ru": "Вокзальная площадь-2"
+            },
+            "lat": 41.7225779,
+            "lon": 44.7964416
+        }
+    ],
+    "lines": [
+        {
+            "id": "1",
+            "name": {
+                "ka": "ახმეტელი-ვარკეთილის ხაზი",
+                "en": "Akhmeteli-Varketili Line",
+                "ru": "Ахметели-Варкетильская линия"
+            },
+            "color": "#FF0000",
+            "stations": [
+                "varketili",
+                "samgori",
+                "isani",
+                "300-aragveli",
+                "avlabari",
+                "liberty-square",
+                "rustaveli",
+                "marjanishvili",
+                "station-square-1",
+                "nadzaledevi",
+                "gotsiridze",
+                "didube",
+                "ghrmaghele",
+                "guramishvili",
+                "sarajishvili",
+                "akhmeteli-theatre"
+            ]
+        },
+        {
+            "id": "2",
+            "name": {
+                "ka": "საბურთალოს ხაზი",
+                "en": "Saburtalo Line",
+                "ru": "Сабурталинская линия"
+            },
+            "color": "green",
+            "stations": [
+                "state-university",
+                "vazha-pshavela",
+                "delisi",
+                "medical-university",
+                "technical-university",
+                "tsereteli",
+                "station-square-2"
+            ]
+        }
+    ],
+    "transfers": [
+        {
+            "from": "station-square-1",
+            "to": "station-square-2",
+            "walkSeconds": 151.8458596662743
+        }
+    ]
+}

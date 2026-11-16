@@ -1,0 +1,15 @@
+{
+  "_comment": "Russian names: OSM station name:ru are Georgian transliterations; use the Russian translations already used in OSM route names.",
+  "stations": {
+    "liberty-square": { "ru": "Площадь Свободы" },
+    "state-university": { "ru": "Государственный университет" },
+    "akhmeteli-theatre": { "ru": "Театр Ахметели" },
+    "station-square-1": { "ru": "Вокзальная площадь-1" },
+    "station-square-2": { "ru": "Вокзальная площадь-2" },
+    "technical-university": { "ru": "Технический университет" },
+    "medical-university": { "ru": "Медицинский университет" }
+  },
+  "lines": {
+    "1": { "ru": "Ахметели-Варкетильская линия" }
+  }
+}

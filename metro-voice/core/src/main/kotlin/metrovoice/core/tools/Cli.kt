@@ -11,14 +11,16 @@ private val pretty = Json { prettyPrint = true }
 
 /**
  * Developer tools:
- *   import-osm <overpass.json> <graph.json> <city>
+ *   import-osm <overpass.json> <graph.json> <city> [overrides.json]
  *   replay <graph.json> <trip.jsonl>
  */
 fun main(args: Array<String>) {
     when (args.firstOrNull()) {
         "import-osm" -> {
             val (input, output, city) = Triple(args[1], args[2], args.getOrElse(3) { "city" })
-            val graph = OsmImporter.import(File(input).readText(), OsmImporter.Options(city))
+            val overrides = args.getOrNull(4)?.let { OsmImporter.NameOverrides.parse(File(it).readText()) }
+                ?: OsmImporter.NameOverrides()
+            val graph = OsmImporter.import(File(input).readText(), OsmImporter.Options(city, overrides = overrides))
             MetroNetwork(graph) // validates
             File(output).apply { parentFile?.mkdirs() }.writeText(pretty.encodeToString(MetroGraph.serializer(), graph))
             println("Wrote $output: ${graph.lines.size} lines, ${graph.stations.size} stations, ${graph.transfers.size} transfers")
@@ -31,6 +33,6 @@ fun main(args: Array<String>) {
                 result.labels.map { it.t to "TRUTH ${it.stationId}" }
             events.sortedBy { it.first }.forEach { (t, s) -> println("%8.1f  %s".format(t, s)) }
         }
-        else -> println("usage: import-osm <overpass.json> <graph.json> <city> | replay <graph.json> <trip.jsonl>")
+        else -> println("usage: import-osm <overpass.json> <graph.json> <city> [overrides.json] | replay <graph.json> <trip.jsonl>")
     }
 }

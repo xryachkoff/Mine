@@ -40,7 +40,20 @@ object OsmImporter {
         val stationMatchMeters: Double = 400.0,
         /** Stations of different lines closer than this become a transfer. */
         val transferMeters: Double = 350.0,
+        /** Hand-made name fixes applied on top of OSM. */
+        val overrides: NameOverrides = NameOverrides(),
     )
+
+    /** data/overrides/<city>.json: {"stations": {id: {lang: name}}, "lines": {id: {lang: name}}} */
+    @Serializable
+    data class NameOverrides(
+        val stations: Map<String, Names> = emptyMap(),
+        val lines: Map<String, Names> = emptyMap(),
+    ) {
+        companion object {
+            fun parse(text: String): NameOverrides = Json { ignoreUnknownKeys = true }.decodeFromString(serializer(), text)
+        }
+    }
 
     fun import(overpassJson: String, options: Options): MetroGraph {
         val export = json.decodeFromString(OsmExport.serializer(), overpassJson)
@@ -68,9 +81,12 @@ object OsmImporter {
                 if (ids.lastOrNull() != s.id) ids += s.id
             }
             if (ids.size < 2) continue
+            val lineId = slug(key)
+            // Route names carry the direction ("Line: A → B"); keep only the line name.
+            val lineNames = names(rel.tags).mapValues { it.value.substringBefore(":").trim() }
             lines += Line(
-                id = slug(key),
-                name = names(rel.tags),
+                id = lineId,
+                name = lineNames + options.overrides.lines[lineId].orEmpty(),
                 color = rel.tags["colour"],
                 stations = ids,
             )
@@ -86,7 +102,12 @@ object OsmImporter {
                 if (d <= options.transferMeters) transfers += Transfer(sa, sb, walkSeconds = 60.0 + d / 1.2)
             }
         }
-        return MetroGraph(options.city, stations.values.toList(), lines, transfers)
+        val finalStations = stations.values.map { st ->
+            options.overrides.stations[st.id]?.let { st.copy(name = st.name + it) } ?: st
+        }
+        val unknown = options.overrides.stations.keys - stations.keys
+        require(unknown.isEmpty()) { "Overrides for unknown stations: $unknown" }
+        return MetroGraph(options.city, finalStations, lines, transfers)
     }
 
     private fun OsmMember.isStop() = role == "stop" || role.startsWith("stop_")

@@ -47,6 +47,16 @@ class OsmImporterTest {
         assertEquals("ა", g.stations.first { it.id == "alpha" }.name["ka"])
         assertEquals(1, g.transfers.size)
         assertEquals(setOf("bravo-square-1", "bravo-square-2"), setOf(g.transfers[0].from, g.transfers[0].to))
+        assertEquals("Red", red.name["en"], "direction suffix stripped")
+    }
+
+    @Test
+    fun appliesNameOverrides() {
+        val o = OsmImporter.NameOverrides(stations = mapOf("alpha" to mapOf("ru" to "Альфа-центр")), lines = mapOf("2" to mapOf("ru" to "Синяя")))
+        val g = OsmImporter.import(export, OsmImporter.Options("test", overrides = o))
+        assertEquals("Альфа-центр", g.stations.first { it.id == "alpha" }.name["ru"])
+        assertEquals("Alpha", g.stations.first { it.id == "alpha" }.name["en"])
+        assertEquals("Синяя", g.lines.first { it.id == "2" }.name["ru"])
     }
 }
 
