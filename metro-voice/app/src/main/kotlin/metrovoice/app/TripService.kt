@@ -84,6 +84,10 @@ class TripService : LifecycleService() {
     private val telephony by lazy { getSystemService(TelephonyManager::class.java) }
     private val wifi by lazy { applicationContext.getSystemService(WifiManager::class.java) }
 
+    /** 4 decimals: below sensor noise, keeps the trip file small. */
+    private fun r4(x: Float): Double = Math.round(x * 10_000.0) / 10_000.0
+    private fun r4(x: Double): Double = Math.round(x * 10_000.0) / 10_000.0
+
     private fun now(): Double = (SystemClock.elapsedRealtimeNanos() - startNs) / 1e9
     private fun tOf(timestampNs: Long): Double = (timestampNs - startNs) / 1e9
 
@@ -110,12 +114,12 @@ class TripService : LifecycleService() {
         startNs = SystemClock.elapsedRealtimeNanos()
 
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
-        val file = File(CityRepository.tripsDir(this), "trip-$stamp.jsonl")
+        val file = File(CityRepository.tripsDir(this), "trip-$stamp.jsonl.gz")
         trace = TraceWriter(file)
         speaker = Speaker(this) { lang -> TripBus.update { it.copy(missingVoices = it.missingVoices + lang) } }
 
         handler.post {
-            trace?.write(TraceRecord.Meta(0.0, net.graph.city, "${Build.MANUFACTURER} ${Build.MODEL} API ${Build.VERSION.SDK_INT}", "0.1.0"))
+            trace?.write(TraceRecord.Meta(0.0, net.graph.city, "${Build.MANUFACTURER} ${Build.MODEL} API ${Build.VERSION.SDK_INT}", "0.2.1"))
             engine = TripEngine(net, listOf("ru", "en"), listener = EngineListener()).also { e ->
                 TripBus.state.value.destination?.let(e::setDestination)
             }
@@ -192,17 +196,17 @@ class TripService : LifecycleService() {
 
     private val sensorListener = object : SensorEventListener {
         override fun onSensorChanged(e: SensorEvent) {
-            val t = tOf(e.timestamp)
+            val t = r4(tOf(e.timestamp))
             val v = e.values
             when (e.sensor.type) {
                 Sensor.TYPE_ACCELEROMETER -> {
-                    val (x, y, z) = Triple(v[0].toDouble(), v[1].toDouble(), v[2].toDouble())
+                    val (x, y, z) = Triple(r4(v[0]), r4(v[1]), r4(v[2]))
                     trace?.write(TraceRecord.Acc(t, x, y, z))
                     engine?.onAccelerometer(t, x, y, z)
                 }
-                Sensor.TYPE_GYROSCOPE -> trace?.write(TraceRecord.Gyro(t, v[0].toDouble(), v[1].toDouble(), v[2].toDouble()))
-                Sensor.TYPE_MAGNETIC_FIELD -> trace?.write(TraceRecord.Mag(t, v[0].toDouble(), v[1].toDouble(), v[2].toDouble()))
-                Sensor.TYPE_PRESSURE -> trace?.write(TraceRecord.Baro(t, v[0].toDouble()))
+                Sensor.TYPE_GYROSCOPE -> trace?.write(TraceRecord.Gyro(t, r4(v[0]), r4(v[1]), r4(v[2])))
+                Sensor.TYPE_MAGNETIC_FIELD -> trace?.write(TraceRecord.Mag(t, r4(v[0]), r4(v[1]), r4(v[2])))
+                Sensor.TYPE_PRESSURE -> trace?.write(TraceRecord.Baro(t, r4(v[0])))
             }
         }
 

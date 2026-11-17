@@ -9,6 +9,22 @@ import java.io.File
 
 private val pretty = Json { prettyPrint = true }
 
+/** Reads .jsonl or .jsonl.gz; a gzip cut short (app killed) yields the lines written so far. */
+fun openTrace(file: File): java.io.BufferedReader {
+    if (!file.name.endsWith(".gz")) return file.bufferedReader()
+    // Read raw bytes until the stream ends or breaks, so nothing decoded is lost on truncation.
+    val bytes = java.io.ByteArrayOutputStream()
+    java.util.zip.GZIPInputStream(file.inputStream()).use { input ->
+        val buf = ByteArray(8192)
+        try {
+            while (true) { val n = input.read(buf); if (n < 0) break; bytes.write(buf, 0, n) }
+        } catch (e: java.io.EOFException) {
+            System.err.println("warning: trip file truncated, using the part that was written")
+        }
+    }
+    return bytes.toString(Charsets.UTF_8).reader().buffered()
+}
+
 /**
  * Developer tools:
  *   import-osm <overpass.json> <graph.json> <city> [overrides.json]
@@ -28,7 +44,7 @@ fun main(args: Array<String>) {
         }
         "replay" -> {
             val network = MetroNetwork(MetroGraph.parse(File(args[1]).readText()))
-            val result = File(args[2]).bufferedReader().useLines { TraceReplayer.replay(it, network) }
+            val result = openTrace(File(args[2])).useLines { TraceReplayer.replay(it, network) }
             val events = result.spoken.map { it.t to "SAY   ${it.announcement.text}" } +
                 result.labels.map { it.t to "TRUTH ${it.stationId}" }
             events.sortedBy { it.first }.forEach { (t, s) -> println("%8.1f  %s".format(t, s)) }

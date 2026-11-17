@@ -104,3 +104,20 @@ class TraceTest {
         assertTrue(live.any { it.text == "Bravo." }, live.toString())
     }
 }
+
+class GzipTraceTest {
+    @Test
+    fun readsCompleteAndTruncatedGzipTraces() {
+        val dir = kotlin.io.path.createTempDirectory().toFile()
+        val f = java.io.File(dir, "trip.jsonl.gz")
+        val gz = java.util.zip.GZIPOutputStream(f.outputStream(), 1 shl 16, true)
+        val w = gz.bufferedWriter()
+        repeat(1000) { w.write(TraceCodec.encode(TraceRecord.Acc(it * 0.02, 0.1, 0.2, 9.8))); w.newLine() }
+        w.flush() // sync-flush, no trailer yet: simulates an app killed mid-trip
+        val truncated = java.io.File(dir, "cut.jsonl.gz").also { f.copyTo(it) }
+        w.close()
+
+        assertEquals(1000, metrovoice.core.tools.openTrace(f).readLines().size)
+        assertEquals(1000, metrovoice.core.tools.openTrace(truncated).readLines().size)
+    }
+}

@@ -123,7 +123,7 @@ class MainActivity : ComponentActivity() {
         val latest = CityRepository.tripsDir(this).listFiles()?.maxByOrNull(File::lastModified) ?: return
         val uri = FileProvider.getUriForFile(this, "$packageName.files", latest)
         val send = Intent(Intent.ACTION_SEND)
-            .setType("application/json")
+            .setType(if (latest.name.endsWith(".gz")) "application/gzip" else "application/json")
             .putExtra(Intent.EXTRA_STREAM, uri)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         startActivity(Intent.createChooser(send, "Экспорт поездки"))
