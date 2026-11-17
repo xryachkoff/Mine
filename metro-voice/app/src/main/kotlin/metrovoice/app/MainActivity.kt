@@ -2,6 +2,10 @@ package metrovoice.app
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.location.LocationManager
+import android.net.Uri
+import android.provider.Settings
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -12,7 +16,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -22,7 +28,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.location.LocationManagerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import metrovoice.app.ui.MetroTheme
@@ -33,6 +41,9 @@ import metrovoice.core.graph.MetroNetwork
 import java.io.File
 
 class MainActivity : ComponentActivity() {
+    private fun hasPermission(p: String) =
+        ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -62,10 +73,38 @@ class MainActivity : ComponentActivity() {
         var message by rememberSaveable { mutableStateOf<String?>(null) }
         var screen by rememberSaveable { mutableStateOf("trip") }
 
+        var notice by rememberSaveable { mutableStateOf<Notice?>(null) }
+
         val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
-            if (granted[Manifest.permission.ACCESS_FINE_LOCATION] == true || granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true) {
-                TripService.start(this)
+            val fine = granted[Manifest.permission.ACCESS_FINE_LOCATION] == true || hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+            val coarse = granted[Manifest.permission.ACCESS_COARSE_LOCATION] == true || hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+            when {
+                !fine && !coarse -> notice = Notice.NO_LOCATION
+                !LocationManagerCompat.isLocationEnabled(getSystemService(LocationManager::class.java)) -> notice = Notice.LOCATION_OFF
+                else -> {
+                    // Approximate location (~3 km) cannot tell stations apart; still record sensors, but say so.
+                    if (!fine) notice = Notice.APPROXIMATE
+                    TripService.start(this)
+                }
             }
+        }
+
+        notice?.let { n ->
+            AlertDialog(
+                onDismissRequest = { notice = null },
+                title = { Text(n.title) },
+                text = { Text(n.text) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        notice = null
+                        startActivity(
+                            if (n == Notice.LOCATION_OFF) Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                            else Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)),
+                        )
+                    }) { Text("Открыть настройки") }
+                },
+                dismissButton = { TextButton(onClick = { notice = null }) { Text("Позже") } },
+            )
         }
 
         fun signIn(block: suspend () -> SignInResult) = scope.launch {
@@ -128,6 +167,21 @@ class MainActivity : ComponentActivity() {
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         startActivity(Intent.createChooser(send, "Экспорт поездки"))
     }
+}
+
+private enum class Notice(val title: String, val text: String) {
+    NO_LOCATION(
+        "Нужен доступ к геолокации",
+        "Без него приложение не узнает станцию. Откройте настройки → Разрешения → Местоположение → «Разрешить только во время использования» и включите «Точное местоположение».",
+    ),
+    APPROXIMATE(
+        "Включите точное местоположение",
+        "С приблизительной геолокацией (точность около 3 км) станции не различить. Поездка записывается, но объявлений может не быть. Настройки → Разрешения → Местоположение → «Точное местоположение».",
+    ),
+    LOCATION_OFF(
+        "Геолокация выключена",
+        "Включите «Местоположение» в настройках телефона, затем снова нажмите «Начать поездку».",
+    ),
 }
 
 private val requiredPermissions = buildList {
