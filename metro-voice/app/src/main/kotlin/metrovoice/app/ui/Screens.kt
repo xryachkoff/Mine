@@ -21,13 +21,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -56,10 +60,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import metrovoice.app.Account
 import metrovoice.app.Profile
+import metrovoice.app.TripInfo
 import metrovoice.app.UiState
 import metrovoice.core.graph.Line
 import metrovoice.core.graph.MetroNetwork
@@ -168,6 +174,7 @@ private fun LineMotif(modifier: Modifier) {
 // Trip
 // ------------------------------------------------------------------------------------------
 
+/** Main screen: what matters during a ride — where am I, what is next, the line. Nothing else. */
 @Composable
 fun TripScreen(
     network: MetroNetwork,
@@ -175,175 +182,175 @@ fun TripScreen(
     profile: Profile,
     onStart: () -> Unit,
     onStop: () -> Unit,
-    onExport: () -> Unit,
+    onHistory: () -> Unit,
     onProfile: () -> Unit,
     onAtStation: (String) -> Unit,
     onDestination: (String?) -> Unit,
 ) {
     Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp)) {
-        Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Metro Voice", fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Metro Voice", fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            IconButton(onClick = onHistory) { Icon(Icons.Default.DateRange, contentDescription = "История поездок") }
             IconButton(onClick = onProfile) { Icon(Icons.Default.Person, contentDescription = "Профиль") }
         }
 
-        NowCard(network, state)
-        Spacer(Modifier.height(12.dp))
-
-        DestinationRow(network, profile, state.destination, onDestination, onProfile)
-        Spacer(Modifier.height(12.dp))
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (state.running) {
-                Button(onClick = onStop, modifier = Modifier.weight(1f).height(48.dp)) { Text("Остановить") }
-            } else {
-                Button(onClick = onStart, modifier = Modifier.weight(1f).height(48.dp)) { Text("Начать поездку") }
-            }
-            OutlinedButton(onClick = onExport, modifier = Modifier.height(48.dp)) { Text("Экспорт") }
+        if (state.running) {
+            NowCard(network, state)
+            Spacer(Modifier.height(8.dp))
         }
         if (state.missingVoices.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
             Text(
                 "Нет голоса для: ${state.missingVoices.joinToString()}. Настройки → Синтез речи.",
-                color = MaterialTheme.colorScheme.error, fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.error, fontSize = 13.sp, modifier = Modifier.padding(bottom = 8.dp),
             )
         }
-        Spacer(Modifier.height(12.dp))
-        LineStrip(network, state, onAtStation)
+
+        LineStrip(network, state, profile, onAtStation, onDestination, Modifier.weight(1f))
+
+        Button(
+            onClick = if (state.running) onStop else onStart,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).height(52.dp),
+            colors = if (state.running) ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) else ButtonDefaults.buttonColors(),
+        ) {
+            Text(
+                when {
+                    state.demo -> "Остановить демо"
+                    state.running -> "Остановить поездку"
+                    else -> "Начать поездку"
+                },
+                fontSize = 16.sp,
+            )
+        }
     }
 }
 
 @Composable
 private fun NowCard(network: MetroNetwork, state: UiState) {
     val e = state.estimate
+    val atStation = e?.current?.takeIf { e.atStationProbability > 0.5 }
+    val nextKnown = e?.next?.takeIf { it.probability >= 0.85 }
     Card(
         Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
     ) {
-        Column(Modifier.padding(16.dp)) {
-            if (!state.running) {
-                Text("Поездка не запущена", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
-                Text(
-                    "Нажмите «Начать поездку» у входа в метро — объявления пойдут в наушники.",
-                    fontSize = 14.sp, color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-                return@Column
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            val label = when {
+                e?.current == null && e?.next == null -> "ИЩУ СТАНЦИЮ"
+                atStation != null -> "СТАНЦИЯ"
+                else -> "В ПУТИ"
             }
-            val phase = when (state.phase) {
-                "MOVING" -> "едем"
-                "STOPPED" -> "стоим"
-                "WALKING" -> "пешком"
-                else -> "ждём сигнал"
-            }
-            Text(phase.uppercase(), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            val current = e?.current?.takeIf { e.atStationProbability > 0.5 }
             Text(
-                current?.let { network.ruName(it.stationId) } ?: "В пути",
-                fontSize = 28.sp, fontWeight = FontWeight.Bold,
+                (if (state.demo) "ДЕМО · " else "") + label,
+                fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
             )
-            e?.next?.let { n ->
+            Text(
+                when {
+                    atStation != null -> network.ruName(atStation.stationId)
+                    nextKnown != null -> "→ ${network.ruName(nextKnown.stationId)}"
+                    e?.current == null && e?.next == null -> "Жду сигнал сети"
+                    else -> "Между станциями"
+                },
+                fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            if (atStation != null) {
                 Text(
-                    "Следующая: ${network.ruName(n.stationId)} · ${percent(n.probability)}",
-                    fontSize = 16.sp,
+                    nextKnown?.let { "Следующая: ${network.ruName(it.stationId)}" } ?: "Направление уточню на следующей станции",
+                    fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
-            } ?: Text("Направление уточню на следующей станции", fontSize = 16.sp)
-            state.lastSaid?.let {
-                Spacer(Modifier.height(8.dp))
-                Text("🔊 $it", fontSize = 13.sp, color = MaterialTheme.colorScheme.onPrimaryContainer)
             }
         }
     }
 }
 
 @Composable
-private fun DestinationRow(
+private fun LineStrip(
     network: MetroNetwork,
+    state: UiState,
     profile: Profile,
-    destination: String?,
+    onAtStation: (String) -> Unit,
     onDestination: (String?) -> Unit,
-    onProfile: () -> Unit,
+    modifier: Modifier,
 ) {
-    if (profile.homeStationId == null && profile.workStationId == null) {
-        OutlinedButton(onClick = onProfile, modifier = Modifier.fillMaxWidth()) {
-            Text("Указать дом и работу — направление будет известно сразу")
-        }
-        return
-    }
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        profile.homeStationId?.let { id ->
-            FilterChip(
-                selected = destination == id,
-                onClick = { onDestination(if (destination == id) null else id) },
-                label = { Text("🏠 Домой · ${network.ruName(id)}", maxLines = 1) },
-            )
-        }
-        profile.workStationId?.let { id ->
-            FilterChip(
-                selected = destination == id,
-                onClick = { onDestination(if (destination == id) null else id) },
-                label = { Text("💼 Работа · ${network.ruName(id)}", maxLines = 1) },
-            )
-        }
-    }
-}
-
-@Composable
-private fun LineStrip(network: MetroNetwork, state: UiState, onAtStation: (String) -> Unit) {
-    val estimate = state.estimate
+    val estimate = state.estimate.takeIf { state.running }
     val trackedLine = estimate?.current?.lineId ?: estimate?.next?.lineId
     var selected by remember { mutableStateOf(trackedLine ?: network.lines.first().id) }
     LaunchedEffect(trackedLine) { trackedLine?.let { selected = it } }
 
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        profile.homeStationId?.let { id ->
+            FilterChip(
+                selected = state.destination == id,
+                onClick = { onDestination(if (state.destination == id) null else id) },
+                label = { Text("🏠 Домой", maxLines = 1) },
+            )
+        }
+        profile.workStationId?.let { id ->
+            FilterChip(
+                selected = state.destination == id,
+                onClick = { onDestination(if (state.destination == id) null else id) },
+                label = { Text("💼 На работу", maxLines = 1) },
+            )
+        }
         network.lines.forEach { line ->
             FilterChip(
                 selected = selected == line.id,
                 onClick = { selected = line.id },
                 leadingIcon = { Box(Modifier.size(10.dp).clip(CircleShape).background(line.composeColor())) },
-                label = { Text(line.ruName(), maxLines = 1) },
+                label = { Text(line.ruName().removeSuffix(" линия"), maxLines = 1) },
             )
         }
     }
-    if (state.running) {
-        Text(
-            "Ошиблось? Нажмите станцию, где вы сейчас.",
-            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 4.dp),
-        )
-    }
+
     val line = network.line(selected)
     val lineColor = line.composeColor()
-    LazyColumn {
-        items(line.stations) { stationId ->
-            val isCurrent = estimate?.current?.let { it.stationId == stationId && it.lineId == line.id && estimate.atStationProbability > 0.5 } == true
-            val isNext = estimate?.next?.let { it.stationId == stationId && it.lineId == line.id } == true
-            val isDestination = state.destination == stationId
+    val currentId = estimate?.current?.takeIf { it.lineId == line.id && estimate.atStationProbability > 0.5 }?.stationId
+    val next = estimate?.next?.takeIf { it.lineId == line.id }
+    val listState = rememberLazyListState()
+    val focusIndex = line.stations.indexOf(currentId ?: next?.stationId)
+    LaunchedEffect(focusIndex, selected) {
+        if (focusIndex >= 0) listState.animateScrollToItem((focusIndex - 2).coerceAtLeast(0))
+    }
+
+    LazyColumn(modifier.fillMaxWidth(), state = listState) {
+        items(line.stations, key = { it }) { stationId ->
+            val isCurrent = stationId == currentId
+            val isNext = stationId == next?.stationId
             Row(
-                Modifier.fillMaxWidth().height(52.dp).clickable(enabled = state.running) { onAtStation(stationId) },
+                Modifier.fillMaxWidth().height(48.dp).clickable(enabled = state.running && !state.demo) { onAtStation(stationId) },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.width(32.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
                     Box(Modifier.width(6.dp).fillMaxHeight().background(lineColor))
-                    val dot = if (isCurrent) 22.dp else 14.dp
                     Box(
-                        Modifier.size(dot).clip(CircleShape)
+                        Modifier.size(if (isCurrent) 22.dp else 14.dp).clip(CircleShape)
                             .background(if (isCurrent || isNext) lineColor else MaterialTheme.colorScheme.surface)
                             .border(3.dp, lineColor, CircleShape),
                     )
                 }
                 Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    val st = network.station(stationId)
-                    Text(
-                        (if (isDestination) "🏁 " else "") + network.ruName(stationId),
-                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                        fontSize = if (isCurrent) 18.sp else 16.sp,
-                    )
-                    st.name["en"]?.let { Text(it, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                }
+                Text(
+                    (if (state.destination == stationId) "🏁 " else "") + network.ruName(stationId),
+                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                    fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
                 when {
-                    isCurrent -> Badge("сейчас ${percent(estimate?.current?.probability)}", lineColor)
-                    isNext -> Badge("далее ${percent(estimate?.next?.probability)}", lineColor)
+                    isCurrent -> Badge("вы здесь", lineColor)
+                    isNext -> Badge(if ((next?.probability ?: 0.0) >= 0.85) "далее" else "далее?", lineColor)
                 }
+            }
+        }
+        if (state.running && !state.demo) {
+            item(key = "hint") {
+                Text(
+                    "Ошиблось? Нажмите станцию, где вы сейчас.",
+                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
             }
         }
     }
@@ -353,6 +360,64 @@ private fun LineStrip(network: MetroNetwork, state: UiState, onAtStation: (Strin
 private fun Badge(text: String, color: Color) {
     Surface(shape = RoundedCornerShape(50), color = color.copy(alpha = 0.15f)) {
         Text(text, color = color, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+    }
+}
+
+// ------------------------------------------------------------------------------------------
+// History
+// ------------------------------------------------------------------------------------------
+
+@Composable
+fun HistoryScreen(
+    trips: List<TripInfo>,
+    onBack: () -> Unit,
+    onShare: (TripInfo) -> Unit,
+    onDelete: (TripInfo) -> Unit,
+) {
+    var deleting by remember { mutableStateOf<TripInfo?>(null) }
+    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp)) {
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад") }
+            Text("История поездок", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        }
+        if (trips.isEmpty()) {
+            Text(
+                "Пока пусто. Каждая поездка записывается сюда — её можно отправить для разбора.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 24.dp),
+            )
+            return@Column
+        }
+        Text(
+            "Запись содержит показания датчиков, геолокацию и видимые соты и Wi-Fi за время поездки.",
+            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp),
+        )
+        LazyColumn {
+            items(trips, key = { it.path }) { trip ->
+                Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(trip.title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            trip.subtitle + if (trip.recording) " · идёт запись" else "",
+                            fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { onShare(trip) }) { Icon(Icons.Default.Share, contentDescription = "Отправить") }
+                    IconButton(onClick = { deleting = trip }, enabled = !trip.recording) {
+                        Icon(Icons.Default.Delete, contentDescription = "Удалить")
+                    }
+                }
+                HorizontalDivider()
+            }
+        }
+    }
+    deleting?.let { trip ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("Удалить запись?") },
+            text = { Text("${trip.title} · ${trip.subtitle}") },
+            confirmButton = { TextButton(onClick = { onDelete(trip); deleting = null }) { Text("Удалить") } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Отмена") } },
+        )
     }
 }
 
@@ -369,6 +434,7 @@ fun ProfileScreen(
     onSetHome: (String?) -> Unit,
     onSetWork: (String?) -> Unit,
     onSignOut: () -> Unit,
+    onDemo: () -> Unit,
 ) {
     var picking by remember { mutableStateOf<String?>(null) } // "home" | "work"
 
@@ -418,6 +484,15 @@ fun ProfileScreen(
         Spacer(Modifier.height(24.dp))
         Text("Озвучка", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
         Text("Русский, затем английский · системный синтез речи", fontSize = 15.sp, modifier = Modifier.padding(vertical = 8.dp))
+
+        Spacer(Modifier.height(24.dp))
+        Text("Проверка", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Text(
+            "Демо-поездка проигрывает выдуманный маршрут с пересадкой в ускоренном темпе: видно экран и слышно объявления, никуда не выезжая.",
+            fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = onDemo, modifier = Modifier.fillMaxWidth()) { Text("Запустить демо-поездку") }
 
         Spacer(Modifier.height(24.dp))
         OutlinedButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth()) {

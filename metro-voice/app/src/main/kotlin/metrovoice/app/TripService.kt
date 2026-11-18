@@ -119,7 +119,7 @@ class TripService : LifecycleService() {
         speaker = Speaker(this) { lang -> TripBus.update { it.copy(missingVoices = it.missingVoices + lang) } }
 
         handler.post {
-            trace?.write(TraceRecord.Meta(0.0, net.graph.city, "${Build.MANUFACTURER} ${Build.MODEL} API ${Build.VERSION.SDK_INT}", "0.2.2"))
+            trace?.write(TraceRecord.Meta(0.0, net.graph.city, "${Build.MANUFACTURER} ${Build.MODEL} API ${Build.VERSION.SDK_INT}", "0.3.0"))
             engine = TripEngine(net, listOf("ru", "en"), listener = EngineListener()).also { e ->
                 TripBus.state.value.destination?.let(e::setDestination)
             }
@@ -157,7 +157,7 @@ class TripService : LifecycleService() {
         }
         speaker?.shutdown()
         engine = null
-        TripBus.update { it.copy(running = false, phase = "—") }
+        TripBus.update { it.copy(running = false, phase = "—", estimate = null, lastSaid = null) }
         super.onDestroy()
     }
 
@@ -240,8 +240,10 @@ class TripService : LifecycleService() {
 
     @SuppressLint("MissingPermission")
     private fun requestLocation() {
-        val request = LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, 5_000)
-            .setMinUpdateIntervalMillis(2_000)
+        // High accuracy: the phone scans Wi-Fi and cells as often as it can. Underground a station gives
+        // only ~20 s of signal, so every second counts; the battery cost is accepted for the ride.
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 2_000)
+            .setMinUpdateIntervalMillis(1_000)
             .build()
         runCatching { fused.requestLocationUpdates(request, locationCallback, thread.looper) }
     }

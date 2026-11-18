@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -33,6 +34,7 @@ import androidx.core.content.FileProvider
 import androidx.core.location.LocationManagerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
+import metrovoice.app.ui.HistoryScreen
 import metrovoice.app.ui.MetroTheme
 import metrovoice.app.ui.ProfileScreen
 import metrovoice.app.ui.TripScreen
@@ -82,6 +84,7 @@ class MainActivity : ComponentActivity() {
                 !fine && !coarse -> notice = Notice.NO_LOCATION
                 !LocationManagerCompat.isLocationEnabled(getSystemService(LocationManager::class.java)) -> notice = Notice.LOCATION_OFF
                 else -> {
+                    DemoRunner.stop()
                     // Approximate location (~3 km) cannot tell stations apart; still record sensors, but say so.
                     if (!fine) notice = Notice.APPROXIMATE
                     TripService.start(this)
@@ -139,6 +142,24 @@ class MainActivity : ComponentActivity() {
                         AuthManager.signOut(this)
                         screen = "trip"
                     },
+                    onDemo = {
+                        TripService.stop(this)
+                        DemoRunner.start(this, network)
+                        screen = "trip"
+                    },
+                )
+            }
+            screen == "history" -> {
+                BackHandler { screen = "trip" }
+                var version by remember { mutableStateOf(0) }
+                val trips = remember(version, state.running) {
+                    TripHistory.list(this, state.tripFile.takeIf { state.running })
+                }
+                HistoryScreen(
+                    trips = trips,
+                    onBack = { screen = "trip" },
+                    onShare = { shareTrip(File(it.path)) },
+                    onDelete = { File(it.path).delete(); version++ },
                 )
             }
             else -> TripScreen(
@@ -146,8 +167,8 @@ class MainActivity : ComponentActivity() {
                 state = state,
                 profile = profile,
                 onStart = { permissionLauncher.launch(requiredPermissions) },
-                onStop = { TripService.stop(this) },
-                onExport = ::shareLatestTrip,
+                onStop = { if (state.demo) DemoRunner.stop() else TripService.stop(this) },
+                onHistory = { screen = "history" },
                 onProfile = { screen = "profile" },
                 onAtStation = { TripBus.commands.tryEmit(Command.AtStation(it)) },
                 onDestination = { id ->
@@ -158,8 +179,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun shareLatestTrip() {
-        val latest = CityRepository.tripsDir(this).listFiles()?.maxByOrNull(File::lastModified) ?: return
+    private fun shareTrip(latest: File) {
         val uri = FileProvider.getUriForFile(this, "$packageName.files", latest)
         val send = Intent(Intent.ACTION_SEND)
             .setType(if (latest.name.endsWith(".gz")) "application/gzip" else "application/json")

@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
+import metrovoice.app.ui.HistoryScreen
 import metrovoice.app.ui.MetroTheme
 import metrovoice.app.ui.ProfileScreen
 import metrovoice.app.ui.StationPickerDialog
@@ -73,7 +74,23 @@ class ScreenshotTest {
     }
 
     @Test fun profileScreen() = shot("5-profile") {
-        ProfileScreen(network, Account("u1", "Ника Б.", "nika@example.com", "google.com"), profile, {}, {}, {}, {})
+        ProfileScreen(network, Account("u1", "Ника Б.", "nika@example.com", "google.com"), profile, {}, {}, {}, {}, {})
+    }
+
+    @Test fun tripInTunnel() = shot("7-trip-in-tunnel", dark = true) {
+        val e = Estimate(0.03, StationBelief("rustaveli", "1", 0.02), StationBelief("marjanishvili", "1", 0.95), 3)
+        TripScreen(network, riding.copy(estimate = e), profile, {}, {}, {}, {}, {}, {})
+    }
+
+    @Test fun history() = shot("8-history") {
+        HistoryScreen(
+            trips = listOf(
+                TripInfo("a", "17 ноября, 18:42", "31 мин · 4,2 МБ", recording = false),
+                TripInfo("b", "17 ноября, 09:05", "24 мин · 3,1 МБ", recording = false),
+                TripInfo("c", "16 ноября, 19:20", "12 мин · 1,6 МБ", recording = false),
+            ),
+            onBack = {}, onShare = {}, onDelete = {},
+        )
     }
 
     @Test fun stationPicker() = shot("6-station-picker", wholeScreen = true) {

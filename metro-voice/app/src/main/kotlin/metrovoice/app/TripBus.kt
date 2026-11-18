@@ -18,6 +18,8 @@ data class UiState(
     val missingVoices: Set<String> = emptySet(),
     /** Station the user is heading to (home / work), may be set before the trip starts. */
     val destination: String? = null,
+    /** Simulated ride (no sensors, nothing recorded). */
+    val demo: Boolean = false,
 )
 
 sealed interface Command {
@@ -52,4 +54,28 @@ object CityRepository {
 
     fun tripsDir(context: Context): File =
         File(context.getExternalFilesDir(null), "trips").apply { mkdirs() }
+}
+
+/** One recorded trip in the history list. */
+data class TripInfo(val path: String, val title: String, val subtitle: String, val recording: Boolean)
+
+object TripHistory {
+    private val nameFormat = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+    private val titleFormat = java.text.SimpleDateFormat("d MMMM, HH:mm", java.util.Locale("ru"))
+
+    fun list(context: Context, recordingPath: String?): List<TripInfo> =
+        CityRepository.tripsDir(context).listFiles().orEmpty()
+            .filter { it.name.startsWith("trip-") }
+            .sortedByDescending { it.name }
+            .map { f ->
+                val start = runCatching { nameFormat.parse(f.name.removePrefix("trip-").substringBefore('.')) }.getOrNull()
+                val minutes = start?.let { ((f.lastModified() - it.time) / 60_000).coerceAtLeast(0) }
+                val size = if (f.length() >= 1_000_000) "%.1f МБ".format(f.length() / 1e6) else "${f.length() / 1000} КБ"
+                TripInfo(
+                    path = f.absolutePath,
+                    title = start?.let(titleFormat::format) ?: f.name,
+                    subtitle = listOfNotNull(minutes?.let { "$it мин" }, size).joinToString(" · "),
+                    recording = f.absolutePath == recordingPath,
+                )
+            }
 }

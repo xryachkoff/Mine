@@ -35,7 +35,18 @@
 
 | | | |
 |---|---|---|
-| ![](docs/screenshots/1-welcome.png) | ![](docs/screenshots/3-trip-riding.png) | ![](docs/screenshots/5-profile.png) |
+| ![](docs/screenshots/3-trip-riding.png) | ![](docs/screenshots/7-trip-in-tunnel.png) | ![](docs/screenshots/8-history.png) |
+
+## Стенд: симуляция поездок
+
+Проверяет логику трекера на настоящем графе Тбилиси с синтетическими датчиками: телефон в руке, пропавшие точки, грубая геолокация, остановка в тоннеле, пересадка.
+
+```bash
+./gradlew :core:cli --args="simulate app/src/main/assets/cities/tbilisi.json"            # таблица сценариев
+./gradlew :core:cli --args="simulate app/src/main/assets/cities/tbilisi.json transfer"   # + хронология сценариев с этим словом
+```
+
+Условия сценариев — допущения, а не измерения: стенд ловит ошибки логики, реальные записи поездок проверяют сами допущения. В приложении тот же симулятор запускается из профиля («Демо-поездка»).
 
 ## Данные города
 
@@ -61,7 +72,7 @@ out body;
 
 ## Разбор записанной поездки
 
-Кнопка «Экспорт поездки» в приложении отдаёт JSONL-файл. Проигрывание через движок на ноутбуке:
+История поездок (иконка календаря) → «Поделиться» отдаёт файл `trip-….jsonl.gz`. Проигрывание через движок на ноутбуке:
 
 ```bash
 ./gradlew :core:cli --args="replay app/src/main/assets/cities/tbilisi.json trip-YYYYMMDD-HHMMSS.jsonl"
