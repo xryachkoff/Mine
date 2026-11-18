@@ -48,7 +48,7 @@ object Fixtures {
 }
 
 /** Generates accelerometer streams for stopped / moving / walking periods at 50 Hz. */
-class RideSimulator(private val engine: TripEngine, seed: Int = 42) {
+class ManualRide(private val engine: TripEngine, seed: Int = 42) {
     private val rnd = Random(seed)
     var t = 0.0
         private set

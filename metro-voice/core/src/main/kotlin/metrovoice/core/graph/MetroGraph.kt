@@ -127,3 +127,18 @@ fun distanceMeters(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Doub
         cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2) * sin(dLon / 2)
     return 2 * EARTH_RADIUS_M * atan2(sqrt(a), sqrt(1 - a))
 }
+
+/** Distance from a point to the straight segment between two coordinates (local flat projection). */
+fun distanceToSegmentMeters(lat: Double, lon: Double, lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val mPerDegLat = 111_320.0
+    val mPerDegLon = 111_320.0 * cos(Math.toRadians(lat))
+    val px = (lon - lon1) * mPerDegLon
+    val py = (lat - lat1) * mPerDegLat
+    val bx = (lon2 - lon1) * mPerDegLon
+    val by = (lat2 - lat1) * mPerDegLat
+    val len2 = bx * bx + by * by
+    val t = if (len2 == 0.0) 0.0 else ((px * bx + py * by) / len2).coerceIn(0.0, 1.0)
+    val dx = px - t * bx
+    val dy = py - t * by
+    return sqrt(dx * dx + dy * dy)
+}

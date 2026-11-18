@@ -2,6 +2,7 @@ package metrovoice.core.tracking
 
 import metrovoice.core.graph.MetroNetwork
 import metrovoice.core.graph.distanceMeters
+import metrovoice.core.graph.distanceToSegmentMeters
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.max
@@ -38,8 +39,8 @@ data class Estimate(
 /**
  * Probabilistic tracker over the metro graph (forward filter of a hidden Markov model).
  *
- * Hidden state: (line, station-or-segment, direction). Observations: network/GPS fixes at stations,
- * departure and stop events from [metrovoice.core.motion.MotionDetector], walking (possible transfer),
+ * Hidden state: (line, station-or-segment, direction). Observations: network/GPS fixes (primary anchor,
+ * valid in any motion phase), departure and stop events from [metrovoice.core.motion.MotionDetector], walking (possible transfer),
  * and explicit user input. Several hypotheses are kept until an observation tells them apart.
  */
 class Tracker(
@@ -66,12 +67,27 @@ class Tracker(
         /** Weight factor for hypotheses heading away from the user's destination. */
         val wrongWayToDestination: Double = 0.02,
         /** Mass of fresh hypotheses mixed in on every fix, for recovery from earlier mistakes. */
-        val reseedMass: Double = 0.05,
+        val reseedMass: Double = 0.03,
+        /**
+         * Prior that the train moved one station without the motion detector noticing.
+         * Deliberately high: on a real phone (in the hand, in a bag) the detector is the weak link,
+         * while a fix at the neighbouring station is strong evidence.
+         */
+        val missedMove: Double = 0.5,
+        /** Prior that a fix near the end of the current segment means "arrived", before a stop is detected. */
+        val arriveOnFix: Double = 0.9,
+        /** How many stations a fix may jump ahead of the believed position. */
+        val maxMissedStations: Int = 3,
+        /** Probability that a fix is garbage (cell handover, stale cache): keeps one outlier from wiping beliefs. */
+        val fixOutlier: Double = 1e-3,
+        /** Direction prior floor when the direction is inferred from the previous position. */
+        val directionFloor: Double = 0.05,
         val pruneBelow: Double = 1e-4,
         val maxHypotheses: Int = 300,
     )
 
     private var hypotheses: List<Hypothesis> = emptyList()
+    private var lastFix: Triple<Double, Double, Double>? = null
 
     /** Station the user is heading to ("home", "work"), possibly on another line. */
     var destination: String? = null
@@ -84,6 +100,7 @@ class Tracker(
     fun reset() {
         hypotheses = emptyList()
         destination = null
+        lastFix = null
     }
 
     /**
@@ -95,15 +112,20 @@ class Tracker(
         if (stationId != null && hypotheses.isNotEmpty()) hypotheses = normalize(hypotheses.map(::applyDestination))
     }
 
-    /** User says "I am at station X" (tap on the line strip). Direction stays unknown unless given. */
+    /**
+     * User says "I am at station X" (tap on the line strip).
+     * Direction is inferred from where we believed the train was before: tapping the next station
+     * along the line tells the direction; tapping the same station keeps it.
+     */
     fun setStation(stationId: String, towardsStationId: String? = null) {
         val seeded = mutableListOf<Hypothesis>()
         for (line in network.lines) {
             val i = line.stations.indexOf(stationId)
             if (i < 0) continue
+            val prior = directionPrior(line.id, i)
             for (d in directionsFrom(line.id, i)) {
                 if (towardsStationId != null && !isTowards(line.id, i, d, towardsStationId)) continue
-                seeded += Hypothesis(line.id, Position.At(i), d, 1.0)
+                seeded += Hypothesis(line.id, Position.At(i), d, prior.getValue(d))
             }
         }
         hypotheses = normalize(seeded.map(::applyDestination))
@@ -117,29 +139,60 @@ class Tracker(
         if (kept.isNotEmpty()) hypotheses = normalize(kept)
     }
 
-    /** A location fix (network or GNSS). Ignored while moving: tunnels have no fresh fixes. */
-    fun onFix(lat: Double, lon: Double, accuracyMeters: Double, trainMoving: Boolean) {
-        if (trainMoving) return
+    /**
+     * A location fix (network or GNSS). Processed in any motion phase: fixes are the primary anchor and
+     * must work even when the motion detector is wrong. A fix at the next station along the line both
+     * moves the belief there and tells the direction.
+     */
+    fun onFix(lat: Double, lon: Double, accuracyMeters: Double) {
+        // The network provider repeats the same cached position; counting it again would fake certainty.
+        val key = Triple(lat, lon, accuracyMeters)
+        if (key == lastFix) return
+        lastFix = key
+
         val sigma = max(accuracyMeters, config.minFixSigmaMeters)
         val fresh = seedFromFix(lat, lon, sigma).map(::applyDestination)
-        if (fresh.isEmpty()) return
         if (hypotheses.isEmpty()) {
             hypotheses = normalize(fresh)
             return
         }
-        val updated = hypotheses.map { h ->
-            val like = when (val p = h.position) {
-                is Position.At -> gauss(distToStation(h.lineId, p.index, lat, lon), sigma)
-                // A fix while "between" stations means we are probably at one of its ends.
-                is Position.Between -> 0.3 * max(
-                    gauss(distToStation(h.lineId, p.from, lat, lon), sigma),
-                    gauss(distToStation(h.lineId, p.to, lat, lon), sigma),
-                )
+        val updated = hypotheses.flatMap { fixBranches(it, lat, lon, sigma) }
+        val reseed = fresh.map { it.copy(weight = it.weight * config.reseedMass) }
+        hypotheses = normalize(merge(updated + reseed))
+    }
+
+    private fun fixBranches(h: Hypothesis, lat: Double, lon: Double, sigma: Double): List<Hypothesis> {
+        val out = mutableListOf<Hypothesis>()
+        fun jumpsFrom(startIndex: Int, direction: Int, firstPrior: Double) {
+            var prior = firstPrior
+            for (n in 1..config.maxMissedStations) {
+                val idx = startIndex + n * direction
+                if (!network.isValidIndex(h.lineId, idx)) break
+                val like = gauss(distToStation(h.lineId, idx, lat, lon), sigma)
+                if (like > 1e-6) out += h.copy(position = Position.At(idx), direction = direction, weight = h.weight * prior * like, movingSeconds = 0.0)
+                prior *= config.missedMove
             }
-            h.copy(weight = h.weight * (like + 1e-3))
         }
-        val reseed = normalize(fresh).map { it.copy(weight = it.weight * config.reseedMass) }
-        hypotheses = normalize(merge(normalize(updated) + reseed))
+        when (val p = h.position) {
+            is Position.At -> {
+                out += h.copy(weight = h.weight * (gauss(distToStation(h.lineId, p.index, lat, lon), sigma) + config.fixOutlier))
+                // Moved on without a detected departure. At a terminus the only way is back.
+                val d = if (network.isValidIndex(h.lineId, p.index + h.direction)) h.direction else -h.direction
+                jumpsFrom(p.index, d, config.missedMove)
+            }
+            is Position.Between -> {
+                val a = network.stationAt(h.lineId, p.from)
+                val b = network.stationAt(h.lineId, p.to)
+                val dEnd = distanceMeters(b.lat, b.lon, lat, lon)
+                val atEnd = gauss(dEnd, sigma)
+                val onSegment = gauss(distanceToSegmentMeters(lat, lon, a.lat, a.lon, b.lat, b.lon), sigma)
+                // "Still in the tunnel" only if the fix is clearly short of the end station (2 sigma zone around it).
+                out += h.copy(weight = h.weight * (onSegment * (1 - gauss(dEnd, 2 * sigma)) + config.fixOutlier))
+                if (atEnd > 1e-6) out += h.copy(position = Position.At(p.to), weight = h.weight * config.arriveOnFix * atEnd, movingSeconds = 0.0)
+                jumpsFrom(p.to, h.direction, config.arriveOnFix * config.missedMove)
+            }
+        }
+        return out
     }
 
     /** Train started moving. */
@@ -242,16 +295,48 @@ class Tracker(
     }
 
     private fun seedFromFix(lat: Double, lon: Double, sigma: Double): List<Hypothesis> {
+        val gate = minOf(config.seedRadiusMeters, max(2.5 * sigma, 400.0))
         val out = mutableListOf<Hypothesis>()
         for (line in network.lines) {
             line.stations.forEachIndexed { i, _ ->
                 val d = distToStation(line.id, i, lat, lon)
-                if (d > config.seedRadiusMeters) return@forEachIndexed
+                if (d > gate) return@forEachIndexed
                 val w = gauss(d, sigma)
-                for (dir in directionsFrom(line.id, i)) out += Hypothesis(line.id, Position.At(i), dir, w)
+                val prior = directionPrior(line.id, i)
+                for (dir in directionsFrom(line.id, i)) out += Hypothesis(line.id, Position.At(i), dir, w * prior.getValue(dir))
             }
         }
         return out
+    }
+
+    /**
+     * Direction prior for "now at index [k] of [lineId]", from the current beliefs: coming from a lower
+     * index means heading up, and vice versa; the same station keeps its direction. Beliefs on another
+     * line count through the transfer station. Uniform when nothing is known.
+     */
+    private fun directionPrior(lineId: String, k: Int): Map<Int, Double> {
+        val dirs = directionsFrom(lineId, k)
+        val score = dirs.associateWith { 0.0 }.toMutableMap()
+        val stations = network.line(lineId).stations
+        for (h in hypotheses) {
+            val sameLine = h.lineId == lineId
+            val anchors = if (sameLine) listOf(baseIndex(h)) else {
+                val sid = network.line(h.lineId).stations[baseIndex(h)]
+                network.transfersAt(sid).mapNotNull { t -> stations.indexOf(t.to).takeIf { it >= 0 } }
+            }
+            for (i in anchors) {
+                val d = when {
+                    k > i -> 1
+                    k < i -> -1
+                    sameLine -> h.direction
+                    else -> continue
+                }
+                if (d in score) score[d] = score.getValue(d) + h.weight
+            }
+        }
+        val total = score.values.sum()
+        if (total <= 0.0) return dirs.associateWith { 1.0 / dirs.size }
+        return dirs.associateWith { d -> score.getValue(d) / total * (1 - config.directionFloor) + config.directionFloor / dirs.size }
     }
 
     private fun directionsFrom(lineId: String, i: Int): List<Int> =

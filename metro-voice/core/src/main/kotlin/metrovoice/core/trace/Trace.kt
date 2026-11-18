@@ -68,7 +68,22 @@ object TraceReplayer {
     data class Spoken(val t: Double, val announcement: Announcement)
     data class Result(val spoken: List<Spoken>, val labels: List<TraceRecord.Label>)
 
-    fun replay(lines: Sequence<String>, network: MetroNetwork, languages: List<String> = listOf("en")): Result {
+    fun replay(
+        lines: Sequence<String>,
+        network: MetroNetwork,
+        languages: List<String> = listOf("en"),
+        destination: String? = null,
+    ): Result = replayRecords(
+        lines.filter { it.isNotBlank() }.mapNotNull { runCatching { TraceCodec.decode(it) }.getOrNull() },
+        network, languages, destination,
+    )
+
+    fun replayRecords(
+        records: Sequence<TraceRecord>,
+        network: MetroNetwork,
+        languages: List<String> = listOf("en"),
+        destination: String? = null,
+    ): Result {
         val spoken = mutableListOf<Spoken>()
         val labels = mutableListOf<TraceRecord.Label>()
         var now = 0.0
@@ -77,9 +92,8 @@ object TraceReplayer {
                 announcements.forEach { spoken += Spoken(now, it) }
             }
         })
-        for (line in lines) {
-            if (line.isBlank()) continue
-            val r = runCatching { TraceCodec.decode(line) }.getOrNull() ?: continue
+        destination?.let(engine::setDestination)
+        for (r in records) {
             now = r.t
             when (r) {
                 is TraceRecord.Acc -> engine.onAccelerometer(r.t, r.x, r.y, r.z)

@@ -78,14 +78,14 @@ class TrackerTest {
     fun secondStationFixResolvesDirection() {
         val tr = Tracker(net)
         val a2 = net.station("A2")
-        tr.onFix(a2.lat, a2.lon, 200.0, trainMoving = false)
+        tr.onFix(a2.lat, a2.lon, 200.0)
         assertEquals("A2", tr.estimate().current?.stationId)
         assertTrue(tr.estimate().next!!.probability < 0.6, "direction unknown at start")
 
         tr.onDeparture()
         tr.onStop(movedSeconds = 92.0)
         val a3 = net.station("A3")
-        tr.onFix(a3.lat, a3.lon, 200.0, trainMoving = false)
+        tr.onFix(a3.lat, a3.lon, 200.0)
 
         val e = tr.estimate()
         assertEquals("A3", e.current?.stationId)
@@ -128,7 +128,7 @@ class TrackerTest {
         tr.onWalking()
         assertTrue(tr.hypotheses().any { it.lineId == "B" && it.position == Position.At(1) })
         val b2 = net.station("B2")
-        tr.onFix(b2.lat, b2.lon, 100.0, trainMoving = false)
+        tr.onFix(b2.lat, b2.lon, 100.0)
         tr.setDirectionTowards("B3")
         tr.onDeparture()
         tr.onStop(movedSeconds = 100.0)
@@ -143,7 +143,7 @@ class TrackerTest {
         tr.onStop(90.0)
         // Fix says we are actually at A4 (user picked the wrong start).
         val a4 = net.station("A4")
-        repeat(3) { tr.onFix(a4.lat, a4.lon, 150.0, trainMoving = false) }
+        tr.onFix(a4.lat, a4.lon, 150.0)
         assertEquals("A4", tr.estimate().current?.stationId)
     }
 }
@@ -158,7 +158,7 @@ class EngineTest {
     fun fullRideAnnouncesInRussianAndEnglishWithoutFalseStations() {
         val rec = Recorder()
         val engine = TripEngine(Fixtures.network, listOf("ru", "en"), listener = rec)
-        val sim = RideSimulator(engine)
+        val sim = ManualRide(engine)
 
         sim.stand(15.0)
         sim.fixAt("A2", accuracy = 250.0, offsetMeters = 120.0)

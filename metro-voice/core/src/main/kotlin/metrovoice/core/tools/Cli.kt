@@ -28,7 +28,8 @@ fun openTrace(file: File): java.io.BufferedReader {
 /**
  * Developer tools:
  *   import-osm <overpass.json> <graph.json> <city> [overrides.json]
- *   replay <graph.json> <trip.jsonl>
+ *   replay <graph.json> <trip.jsonl[.gz]>
+ *   simulate <graph.json>            scenario bench on synthetic rides
  */
 fun main(args: Array<String>) {
     when (args.firstOrNull()) {
@@ -48,6 +49,21 @@ fun main(args: Array<String>) {
             val events = result.spoken.map { it.t to "SAY   ${it.announcement.text}" } +
                 result.labels.map { it.t to "TRUTH ${it.stationId}" }
             events.sortedBy { it.first }.forEach { (t, s) -> println("%8.1f  %s".format(t, s)) }
+        }
+        "simulate" -> {
+            val network = MetroNetwork(MetroGraph.parse(File(args[1]).readText()))
+            println("%-40s %s".format("scenario", "result"))
+            for (sc in metrovoice.core.sim.Scenarios.tbilisi()) {
+                val ride = metrovoice.core.sim.RideSimulator.generate(network, sc.legs, sc.options)
+                println("%-40s %s".format(sc.name, metrovoice.core.sim.RideEvaluator.run(network, ride)))
+                if (args.getOrNull(2)?.let { it in sc.name } == true) {
+                    val r = metrovoice.core.trace.TraceReplayer.replayRecords(ride.records.asSequence(), network, listOf("en"), sc.options.destination)
+                    val events = r.spoken.map { it.t to "SAY   ${it.announcement.text}" } +
+                        ride.truth.map { it.arrive to "TRUTH arrive ${it.stationId} (line ${it.lineId}), departs %.0f".format(it.depart) } +
+                        ride.records.filterIsInstance<metrovoice.core.trace.TraceRecord.Loc>().map { it.t to "FIX" }
+                    events.sortedBy { it.first }.forEach { (t, e) -> println("    %7.1f  %s".format(t, e)) }
+                }
+            }
         }
         else -> println("usage: import-osm <overpass.json> <graph.json> <city> [overrides.json] | replay <graph.json> <trip.jsonl>")
     }

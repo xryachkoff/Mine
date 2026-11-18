@@ -25,7 +25,7 @@ class TbilisiDataTest {
         val tr = metrovoice.core.tracking.Tracker(network)
         tr.setDestination("delisi") // Saburtalo line; from line 1 the way goes via Station Square-1
         val rustaveli = network.station("rustaveli")
-        tr.onFix(rustaveli.lat, rustaveli.lon, 200.0, trainMoving = false)
+        tr.onFix(rustaveli.lat, rustaveli.lon, 200.0)
         val e = tr.estimate()
         assertEquals("rustaveli", e.current?.stationId)
         assertEquals("marjanishvili", e.next?.stationId)
@@ -38,7 +38,7 @@ class TbilisiDataTest {
         val engine = TripEngine(network, listOf("ru"), listener = object : TripEngine.Listener {
             override fun onAnnouncements(announcements: List<Announcement>) { said += announcements }
         })
-        val sim = RideSimulator(engine, seed = 7)
+        val sim = ManualRide(engine, seed = 7)
         fun fix(id: String) = network.station(id).let { engine.onLocation(it.lat, it.lon, 300.0) }
 
         sim.stand(15.0); fix("rustaveli"); sim.stand(15.0)

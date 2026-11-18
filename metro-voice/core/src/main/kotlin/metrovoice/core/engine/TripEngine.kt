@@ -40,16 +40,14 @@ class TripEngine(
     }
 
     fun onLocation(lat: Double, lon: Double, accuracyMeters: Double) {
-        tracker.onFix(lat, lon, accuracyMeters, trainMoving = detector.phase == Phase.MOVING)
-        val estimate = tracker.estimate()
-        if (detector.phase != Phase.MOVING) emit(announcer.onStandingUpdate(estimate))
-        listener.onEstimate(estimate, detector.phase)
+        // Never gated by the motion phase: a detector stuck in MOVING must not blind the tracker.
+        tracker.onFix(lat, lon, accuracyMeters)
+        publishStanding()
     }
 
     fun setStation(stationId: String, towardsStationId: String? = null) {
         tracker.setStation(stationId, towardsStationId)
-        announcer.reset()
-        publishStanding()
+        publishStanding() // re-announces only if the station differs from what was last said
     }
 
     /** "Going home / to work": destination may be on another line. Null clears it. */
@@ -75,7 +73,7 @@ class TripEngine(
         when (change.phase) {
             Phase.MOVING -> {
                 // A departure from a station resets the segment clock; resuming after a tunnel stop does not.
-                if (change.previous == Phase.STOPPED || change.previous == Phase.WALKING || change.previous == Phase.UNKNOWN) {
+                if (change.previous == Phase.STOPPED || change.previous == Phase.WALKING) {
                     movingSince = t
                     tracker.onDeparture()
                     emit(announcer.onDeparture(tracker.estimate()))

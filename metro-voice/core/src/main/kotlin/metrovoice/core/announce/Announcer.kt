@@ -44,6 +44,10 @@ object Phrases {
 /**
  * Decides what to say and when. Core rule: a wrong announcement is worse than silence, so a phrase
  * about a station is spoken only when its probability clears [threshold].
+ *
+ * "Next station" is said as soon as the direction is known — together with the station announcement,
+ * or at departure — and never twice for the same station. This way it does not depend on the motion
+ * detector noticing the departure.
  */
 class Announcer(
     private val network: MetroNetwork,
@@ -60,27 +64,30 @@ class Announcer(
         directionWarningGiven = false
     }
 
-    /** Call after the tracker processed a stop (or a fix while standing). */
+    /** Call whenever the estimate may say "standing at a station": after a stop, a fix, or user input. */
     fun onStandingUpdate(estimate: Estimate): List<Announcement> {
         val current = estimate.current ?: return emptyList()
         if (current.probability < threshold || estimate.atStationProbability < threshold) return emptyList()
-        if (current.stationId == lastStationSaid) return emptyList()
-        lastStationSaid = current.stationId
-        lastNextSaid = null
+        val out = mutableListOf<Announcement>()
 
-        val transferLines = network.transferLines(current.lineId, current.stationId)
-        val out = languages.map { lang ->
-            var text = Phrases.get(lang, "station").replace("{station}", name(current.stationId, lang))
-            if (transferLines.isNotEmpty()) {
-                val lines = transferLines.joinToString(", ") { it.name[lang] ?: it.name["en"] ?: it.id }
-                text += Phrases.get(lang, "transfer").replace("{lines}", lines)
+        if (current.stationId != lastStationSaid) {
+            lastStationSaid = current.stationId
+            lastNextSaid = null
+            val transferLines = network.transferLines(current.lineId, current.stationId)
+            out += languages.map { lang ->
+                var text = Phrases.get(lang, "station").replace("{station}", name(current.stationId, lang))
+                if (transferLines.isNotEmpty()) {
+                    val lines = transferLines.joinToString(", ") { it.name[lang] ?: it.name["en"] ?: it.id }
+                    text += Phrases.get(lang, "transfer").replace("{lines}", lines)
+                }
+                Announcement(AnnouncementKind.STATION, current.stationId, lang, text)
             }
-            Announcement(AnnouncementKind.STATION, current.stationId, lang, text)
-        }.toMutableList()
+        }
 
-        val next = estimate.next
-        val directionKnown = next != null && next.probability >= threshold
-        if (!directionKnown && !directionWarningGiven) {
+        val next = nextToSay(estimate)
+        if (next != null) {
+            out += next
+        } else if (lastNextSaid == null && estimate.next != null && !directionWarningGiven) {
             directionWarningGiven = true
             out += languages.map { lang ->
                 Announcement(AnnouncementKind.DIRECTION_UNKNOWN, null, lang, Phrases.get(lang, "direction_unknown"))
@@ -90,10 +97,11 @@ class Announcer(
     }
 
     /** Call after the tracker processed a departure. */
-    fun onDeparture(estimate: Estimate): List<Announcement> {
-        lastStationSaid = null
-        val next = estimate.next ?: return emptyList()
-        if (next.probability < threshold || next.stationId == lastNextSaid) return emptyList()
+    fun onDeparture(estimate: Estimate): List<Announcement> = nextToSay(estimate).orEmpty()
+
+    private fun nextToSay(estimate: Estimate): List<Announcement>? {
+        val next = estimate.next ?: return null
+        if (next.probability < threshold || next.stationId == lastNextSaid) return null
         lastNextSaid = next.stationId
         directionWarningGiven = true
         return languages.map { lang ->
