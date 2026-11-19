@@ -320,13 +320,7 @@ fun TripScreen(
                     Text(line.ruName(), fontSize = 14.sp, color = onTint)
                 }
                 if (towards != null) {
-                    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.width(24.dp), contentAlignment = Alignment.Center) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(20.dp))
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text("до станции ${network.ruName(towards.stationId)}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                    }
+                    DirectionPill("до станции ${network.ruName(towards.stationId)}", down = null, modifier = Modifier.padding(top = 10.dp))
                 }
                 Spacer(Modifier.height(12.dp))
             }
@@ -474,12 +468,16 @@ private fun RouteWindow(network: MetroNetwork, line: Line, currentId: String?, n
         )
     }
     if (terminus >= 0 && window.last() != terminus) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(32.dp), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = color, modifier = Modifier.size(28.dp))
+        // The line runs on into a solid arrowhead: where the train is going, in the line's own colour.
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).heightIn(min = 52.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(32.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+                Box(Modifier.width(4.dp).fillMaxHeight(0.5f).align(Alignment.TopCenter).background(color))
+                Box(Modifier.size(30.dp).clip(CircleShape).background(color), contentAlignment = Alignment.Center) {
+                    DirectionArrow(true, Color.White, Modifier.size(20.dp))
+                }
             }
             Spacer(Modifier.width(12.dp))
-            Text("до станции ${network.ruName(stations[terminus])}", fontSize = 12.sp, color = p.muted)
+            Text("до станции ${network.ruName(stations[terminus])}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = p.ink)
         }
     }
 }
@@ -513,14 +511,7 @@ private fun StationRow(
         }
         val tag: (@Composable () -> Unit)? = when {
             isCurrent -> ({ Tag("вы здесь", color) })
-            isNext -> ({
-                val arrow = arrowDown?.takeIf { nextSure }
-                Tag(
-                    if (nextSure) "далее" else "далее?", color,
-                    icon = arrow?.let { if (it) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp },
-                    iconDescription = arrow?.let { if (it) "поезд идёт вниз по списку" else "поезд идёт вверх по списку" },
-                )
-            })
+            isNext -> ({ Tag(if (nextSure) "далее" else "далее?", color, arrowDown = arrowDown?.takeIf { nextSure }) })
             else -> null
         }
         val weight = if (isCurrent) FontWeight.Bold else FontWeight.Medium
@@ -598,6 +589,9 @@ fun LineScreen(
             else "${network.ruName(line.stations.first())} — ${network.ruName(line.stations.last())} · ${stationsCount(line.stations.size)}",
             fontSize = 14.sp, color = p.muted, modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
         )
+        if (arrowDown != null) {
+            DirectionPill("поезд идёт до станции ${network.ruName(line.stations[terminus])}", down = arrowDown, modifier = Modifier.padding(bottom = 12.dp))
+        }
         CardSurface(Modifier.fillMaxWidth().weight(1f).padding(bottom = 16.dp), padding = PaddingValues(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)) {
             LazyColumn(state = listState) {
                 items(line.stations, key = { it }) { id ->

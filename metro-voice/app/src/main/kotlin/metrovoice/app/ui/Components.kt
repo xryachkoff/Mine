@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -33,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -183,12 +185,40 @@ fun LineBadge(line: Line, modifier: Modifier = Modifier, size: Dp = 28.dp) {
     }
 }
 
-/** Small status label on a coloured pill: "вы здесь", "далее". [icon] shows the direction of travel. */
+/** Arrow with a shaft, turned to where the train goes. [down] null = to the right (no list to follow). */
 @Composable
-fun Tag(text: String, color: Color, icon: ImageVector? = null, iconDescription: String? = null) {
+fun DirectionArrow(down: Boolean?, tint: Color, modifier: Modifier = Modifier, description: String? = null) {
+    Icon(
+        Icons.AutoMirrored.Filled.ArrowForward, contentDescription = description, tint = tint,
+        modifier = modifier.rotate(when (down) { true -> 90f; false -> -90f; null -> 0f }),
+    )
+}
+
+/** The direction of travel as a solid ink pill: the loudest secondary element on the screen. */
+@Composable
+fun DirectionPill(text: String, down: Boolean?, modifier: Modifier = Modifier) {
+    val p = LocalPalette.current
+    Surface(shape = RoundedCornerShape(50), color = p.ink, contentColor = p.onInk, modifier = modifier) {
+        Row(Modifier.padding(start = 10.dp, end = 14.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            DirectionArrow(down, p.onInk, Modifier.size(20.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+/** Small status label on a coloured pill: "вы здесь", "далее". [arrowDown] adds the direction of travel. */
+@Composable
+fun Tag(text: String, color: Color, arrowDown: Boolean? = null) {
     Surface(shape = RoundedCornerShape(50), color = color, modifier = Modifier.padding(vertical = 4.dp)) {
-        Row(Modifier.padding(start = if (icon != null) 6.dp else 10.dp, end = 10.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (icon != null) Icon(icon, contentDescription = iconDescription, tint = Color.White, modifier = Modifier.size(18.dp))
+        Row(Modifier.padding(start = if (arrowDown != null) 8.dp else 10.dp, end = 10.dp, top = 3.dp, bottom = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (arrowDown != null) {
+                DirectionArrow(
+                    arrowDown, Color.White, Modifier.size(18.dp),
+                    description = if (arrowDown) "поезд идёт вниз по списку" else "поезд идёт вверх по списку",
+                )
+                Spacer(Modifier.width(4.dp))
+            }
             Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
     }
