@@ -1,7 +1,6 @@
 package metrovoice.app.ui
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,18 +8,16 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -30,24 +27,20 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -55,17 +48,16 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -78,224 +70,328 @@ import metrovoice.app.UiState
 import metrovoice.core.graph.Line
 import metrovoice.core.graph.MetroNetwork
 
-// Type scale: 12 / 14 / 16 / 20 / 24 / 34 sp. Nothing else.
-
 private fun MetroNetwork.ruName(id: String) = station(id).name.let { it["ru"] ?: it["en"] ?: id }
-private fun Line.ruName() = (name["ru"] ?: name["en"] ?: id).removeSuffix(" линия")
-
-/**
- * Line colour made safe for text: map colours are tuned for paper, not for white-on-colour labels.
- * Darkened until white text on it reaches 4.5:1; still well above 3:1 against both app backgrounds.
- */
-private fun Line.displayColor(): Color {
-    var c = when (color?.lowercase()) {
-        null -> Color(0xFF1B4DDB)
-        "green" -> Color(0xFF1E9E4A)
-        "red" -> Color(0xFFE02424)
-        else -> runCatching { Color(android.graphics.Color.parseColor(color)) }.getOrDefault(Color(0xFF1B4DDB))
-    }
-    while (c.luminance() > 0.183f) c = Color(c.red * 0.96f, c.green * 0.96f, c.blue * 0.96f)
-    return c
-}
-
-/** Content column: full width on a phone, capped and centred on an unfolded foldable or tablet. */
-@Composable
-private fun ScreenColumn(scroll: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
-    Box(Modifier.fillMaxSize().safeDrawingPadding(), contentAlignment = Alignment.TopCenter) {
-        val base = Modifier.widthIn(max = 600.dp).fillMaxHeight().padding(horizontal = 16.dp)
-        Column(if (scroll) base.verticalScroll(rememberScrollState()) else base, content = content)
-    }
-}
-
-@Composable
-private fun TopBar(title: String, onBack: (() -> Unit)? = null, actions: @Composable () -> Unit = {}) {
-    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (onBack != null) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад") }
-        }
-        Text(title, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-        actions()
-    }
-}
-
-@Composable
-private fun SectionTitle(text: String) {
-    Text(text, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-}
+// Zero-width space after hyphens: long names ("Ахметели-Варкетильская") may wrap there instead of mid-word.
+private fun Line.ruName() = (name["ru"] ?: name["en"] ?: id).removeSuffix(" линия").replace("-", "-\u200B")
+private fun MetroNetwork.cityName() = graph.cityName.let { it["ru"] ?: it["en"] } ?: graph.city.replaceFirstChar(Char::titlecase)
 
 // ------------------------------------------------------------------------------------------
-// Welcome / sign-in (shown only when a sign-in backend is configured)
+// Home: nothing is running. Where to, which lines exist, one button to start.
 // ------------------------------------------------------------------------------------------
 
 @Composable
-fun WelcomeScreen(
-    busy: Boolean,
-    message: String?,
-    onGoogle: () -> Unit,
-    onApple: () -> Unit,
-    onGuest: () -> Unit,
+fun HomeScreen(
+    network: MetroNetwork,
+    profile: Profile,
+    destination: String?,
+    onStart: () -> Unit,
+    onDemo: () -> Unit,
+    onHistory: () -> Unit,
+    onProfile: () -> Unit,
+    onOpenLine: (String) -> Unit,
+    onDestination: (String?) -> Unit,
+    onSetHome: (String) -> Unit,
+    onSetWork: (String) -> Unit,
 ) {
-    ScreenColumn {
-        Column(Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Spacer(Modifier.weight(1f))
-            LineMotif(Modifier.size(width = 120.dp, height = 160.dp))
-            Spacer(Modifier.height(24.dp))
-            Text("Metro Voice", fontSize = 34.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Станции — прямо в наушники.\nРаботает в тоннелях без интернета.",
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 16.sp,
+    val p = LocalPalette.current
+    var picking by remember { mutableStateOf<String?>(null) } // "home" | "work" | "other"
+
+    ScreenColumn(
+        scroll = true,
+        bottomBar = { PrimaryButton("Начать поездку", onStart, Modifier.fillMaxWidth().padding(vertical = 12.dp)) },
+    ) {
+        TopBar(
+            leading = { CityPill(network.cityName()) },
+            actions = {
+                SquareIconButton(AppIcons.History, "История поездок", onHistory)
+                Spacer(Modifier.width(8.dp))
+                SquareIconButton(Icons.Default.Person, "Профиль", onProfile)
+            },
+        )
+
+        CardSurface(Modifier.fillMaxWidth().padding(top = 8.dp), color = p.tintCream, padding = PaddingValues(0.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).padding(start = 20.dp, top = 20.dp, bottom = 20.dp)) {
+                    Text("Готов к поездке", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        if (profile.autoStart) "Начну сам, когда подойдёте к станции." else "Назову станцию и следующую — прямо в наушники.",
+                        fontSize = 14.sp, color = p.ink.copy(alpha = 0.72f),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    PillButton("Демо", onDemo, icon = Icons.Default.PlayArrow, filled = true)
+                }
+                ModeIllustration("subway", network.lines.first().displayColor(), Modifier.padding(end = 8.dp).size(width = 120.dp, height = 132.dp))
+            }
+        }
+
+        SectionTitle("Куда едем")
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PlaceTile(
+                Icons.Default.Home, "Дом", profile.homeStationId?.let(network::ruName),
+                selected = destination != null && destination == profile.homeStationId,
+                onClick = { profile.homeStationId?.let { onDestination(if (destination == it) null else it) } ?: run { picking = "home" } },
             )
-            Spacer(Modifier.weight(1f))
-
-            Button(onClick = onGuest, enabled = !busy, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                Text("Начать без входа", fontSize = 16.sp)
-            }
-            Spacer(Modifier.height(12.dp))
-            OutlinedButton(onClick = onGoogle, enabled = !busy, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                Text("Войти через Google", fontSize = 16.sp)
-            }
-            Spacer(Modifier.height(12.dp))
-            OutlinedButton(onClick = onApple, enabled = !busy, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                Text("Войти через Apple", fontSize = 16.sp)
-            }
-
-            message?.let {
-                Spacer(Modifier.height(8.dp))
-                Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center, fontSize = 14.sp)
-            }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                "Вход нужен, чтобы профиль пережил смену телефона. Записи поездок хранятся только на устройстве.",
-                textAlign = TextAlign.Center,
-                fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            PlaceTile(
+                AppIcons.Work, "Работа", profile.workStationId?.let(network::ruName),
+                selected = destination != null && destination == profile.workStationId,
+                onClick = { profile.workStationId?.let { onDestination(if (destination == it) null else it) } ?: run { picking = "work" } },
+            )
+            val other = destination?.takeIf { it != profile.homeStationId && it != profile.workStationId }
+            PlaceTile(
+                AppIcons.Flag, "Другая станция", other?.let(network::ruName),
+                selected = other != null, emptyLabel = "Выбрать",
+                onClick = { if (other != null) onDestination(null) else picking = "other" },
             )
         }
+        Text(
+            "Необязательно. С целью направление известно с первой станции.",
+            fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 8.dp),
+        )
+
+        // One section per kind of transport: a second city or trams add data, not screens.
+        network.lines.groupBy { it.mode }.forEach { (mode, lines) ->
+            SectionTitle(modeTitle(mode))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                lines.forEach { line -> LineRow(network, line) { onOpenLine(line.id) } }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+
+    picking?.let { which ->
+        StationPickerDialog(
+            network,
+            title = when (which) { "home" -> "Станция у дома"; "work" -> "Станция у работы"; else -> "Куда едете?" },
+            onPick = { id ->
+                when (which) { "home" -> onSetHome(id); "work" -> onSetWork(id) }
+                onDestination(id)
+                picking = null
+            },
+            onDismiss = { picking = null },
+        )
     }
 }
 
-/** Small vertical metro-line illustration: line with stations, one highlighted. Decorative. */
 @Composable
-private fun LineMotif(modifier: Modifier) {
-    val red = Color(0xFFE02424)
-    val green = Color(0xFF1E9E4A)
-    val surface = MaterialTheme.colorScheme.surface
-    Canvas(modifier) {
-        val x1 = size.width * 0.35f
-        val x2 = size.width * 0.70f
-        drawLine(red, Offset(x1, 0f), Offset(x1, size.height), strokeWidth = 14f, cap = StrokeCap.Round)
-        drawLine(green, Offset(x2, size.height * 0.45f), Offset(x2, size.height), strokeWidth = 14f, cap = StrokeCap.Round)
-        drawLine(Color.Gray, Offset(x1, size.height * 0.55f), Offset(x2, size.height * 0.55f), strokeWidth = 6f)
-        listOf(0.1f, 0.32f, 0.55f, 0.78f, 0.95f).forEachIndexed { i, f ->
-            val big = i == 2
-            drawCircle(red, radius = if (big) 22f else 13f, center = Offset(x1, size.height * f))
-            drawCircle(surface, radius = if (big) 10f else 6f, center = Offset(x1, size.height * f))
+private fun CityPill(city: String) {
+    val p = LocalPalette.current
+    Surface(shape = RoundedCornerShape(Radius.control), color = p.card, border = BorderStroke(1.dp, p.outline), modifier = Modifier.heightIn(min = 48.dp)) {
+        Row(Modifier.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.LocationOn, contentDescription = "Город", tint = p.ink, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(city, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = p.ink)
         }
-        listOf(0.55f, 0.8f, 0.97f).forEach { f ->
-            drawCircle(green, radius = 13f, center = Offset(x2, size.height * f))
-            drawCircle(surface, radius = 6f, center = Offset(x2, size.height * f))
+    }
+}
+
+@Composable
+private fun PlaceTile(icon: ImageVector, label: String, station: String?, selected: Boolean, onClick: () -> Unit, emptyLabel: String = "Указать") {
+    val p = LocalPalette.current
+    Surface(
+        onClick = onClick, shape = RoundedCornerShape(Radius.tile),
+        color = if (selected) p.tintBlue else p.card, contentColor = p.ink,
+        border = if (selected) BorderStroke(1.5.dp, p.ink) else null,
+        // Grows with the text (large system fonts) instead of breaking a station name mid-word.
+        modifier = Modifier.width(IntrinsicSize.Max).widthIn(min = 148.dp, max = 240.dp).heightIn(min = 124.dp),
+    ) {
+        Column(Modifier.padding(14.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(36.dp).clip(CircleShape).background(if (selected) p.card else p.canvas), contentAlignment = Alignment.Center) {
+                    Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                if (selected) Icon(Icons.Default.Check, contentDescription = "Выбрано", modifier = Modifier.size(20.dp))
+                else if (station == null) Icon(Icons.Default.Add, contentDescription = null, tint = p.muted, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(label, fontSize = 12.sp, color = if (selected) p.ink.copy(alpha = 0.72f) else p.muted, maxLines = 1)
+            Text(
+                station ?: emptyLabel, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 2, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LineRow(network: MetroNetwork, line: Line, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    CardSurface(Modifier.fillMaxWidth(), onClick = onClick, padding = PaddingValues(horizontal = 16.dp, vertical = 14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            LineBadge(line, size = 36.dp)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(line.ruName(), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "${stationsCount(line.stations.size)} · ${network.ruName(line.stations.first())} — ${network.ruName(line.stations.last())}",
+                    fontSize = 12.sp, color = p.muted,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = p.muted)
         }
     }
 }
 
 // ------------------------------------------------------------------------------------------
-// Trip
+// Trip: a ride is running. One big answer, the next few stations, two actions.
 // ------------------------------------------------------------------------------------------
 
-/**
- * Main screen: where am I, what is next, the line. Position-changing and trip-ending actions
- * ask for confirmation: the phone is used one-handed in a shaking carriage.
- */
 @Composable
 fun TripScreen(
     network: MetroNetwork,
     state: UiState,
     profile: Profile,
     nowElapsedMs: Long,
-    onStart: () -> Unit,
     onStop: () -> Unit,
-    onHistory: () -> Unit,
     onProfile: () -> Unit,
-    onAtStation: (String) -> Unit,
+    onOpenLine: (String) -> Unit,
     onDestination: (String?) -> Unit,
     onToggleMute: () -> Unit,
-    /** Opens with the "are you at this station?" dialog (for screenshots). */
-    initialConfirmStation: String? = null,
 ) {
-    var confirmStation by remember { mutableStateOf(initialConfirmStation) }
+    val p = LocalPalette.current
     var confirmStop by remember { mutableStateOf(false) }
     var pickingDestination by remember { mutableStateOf(false) }
 
-    ScreenColumn {
-        TopBar("Metro Voice") {
-            IconButton(onClick = onHistory) { Icon(AppIcons.History, contentDescription = "История поездок") }
-            IconButton(onClick = onProfile) { Icon(Icons.Default.Person, contentDescription = "Профиль") }
+    val e = state.estimate
+    val atStation = e?.current?.takeIf { e.atStationProbability > 0.5 }
+    val next = e?.next
+    val nextKnown = next?.takeIf { it.probability >= 0.85 }
+    val outside = e?.outside == true
+    val searching = !outside && e?.current == null && next == null
+    val lineId = atStation?.lineId ?: next?.lineId
+    val onTint = p.ink.copy(alpha = 0.72f) // secondary text on a tinted card: muted grey would drop below 4.5:1
+    val fallbackLine = lineId ?: network.lines.first().id
+
+    ScreenColumn(
+        scroll = true,
+        bottomBar = {
+            val fix: @Composable (Modifier) -> Unit = { m -> PillButton("Не та станция", { onOpenLine(fallbackLine) }, m, minHeight = 56.dp) }
+            val end: @Composable (Modifier) -> Unit = { m ->
+                PrimaryButton(if (state.demo) "Остановить демо" else "Завершить", { if (state.demo) onStop() else confirmStop = true }, m)
+            }
+            // Side by side normally; stacked when the system font is large, so no label is cut.
+            if (LocalDensity.current.fontScale > 1.2f) {
+                Column(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    end(Modifier.fillMaxWidth())
+                    if (!state.demo) fix(Modifier.fillMaxWidth())
+                }
+            } else {
+                Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (!state.demo) fix(Modifier.weight(1f))
+                    end(Modifier.weight(1f))
+                }
+            }
+        },
+    ) {
+        TopBar(
+            title = if (state.demo) "Демо-поездка" else "Поездка",
+            actions = {
+                SquareIconButton(
+                    if (profile.muted) AppIcons.VolumeOff else AppIcons.VolumeUp,
+                    if (profile.muted) "Включить звук объявлений" else "Выключить звук объявлений",
+                    onToggleMute,
+                )
+                Spacer(Modifier.width(8.dp))
+                SquareIconButton(Icons.Default.Person, "Профиль", onProfile)
+            },
+        )
+
+        // The answer. Blue when standing at a station, plain in the tunnel, warm when it needs a look.
+        CardSurface(
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            color = when {
+                atStation != null -> p.tintBlue
+                searching || outside -> p.tintCream
+                else -> p.card
+            },
+        ) {
+            lineId?.let { id ->
+                val line = network.line(id)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LineBadge(line, size = 24.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(line.ruName(), fontSize = 14.sp, color = onTint)
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+            Text(
+                when {
+                    outside -> "ВНЕ МЕТРО"
+                    searching -> "ИЩУ СТАНЦИЮ"
+                    atStation != null -> "СТАНЦИЯ"
+                    nextKnown != null -> "ЕДЕМ К СТАНЦИИ"
+                    else -> "В ПУТИ"
+                },
+                fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, color = onTint,
+            )
+            Text(
+                when {
+                    outside -> "Вы вышли из метро"
+                    atStation != null -> network.ruName(atStation.stationId)
+                    nextKnown != null -> network.ruName(nextKnown.stationId)
+                    searching -> "Жду сигнал сети"
+                    else -> "Между станциями"
+                },
+                fontSize = 36.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis,
+            )
+            when {
+                outside -> Text("Поездка завершится сама через пару минут.", fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
+                atStation != null -> {
+                    Spacer(Modifier.height(12.dp))
+                    if (nextKnown != null) {
+                        Text("Следующая", fontSize = 12.sp, color = onTint)
+                        Text(network.ruName(nextKnown.stationId), fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    } else {
+                        Text("Направление уточню на следующей станции.", fontSize = 14.sp, color = onTint)
+                    }
+                }
+            }
         }
 
-        if (state.running) {
-            NowCard(network, state, profile.muted, nowElapsedMs, onToggleMute)
-            Spacer(Modifier.height(8.dp))
+        if (!state.demo && !outside) {
+            val f = freshness(state, nowElapsedMs)
+            Text(f.text, fontSize = 12.sp, color = if (f.stale) p.danger else p.muted, modifier = Modifier.padding(start = 4.dp, top = 8.dp))
         }
         if (state.missingVoices.isNotEmpty() && !profile.muted) {
             Text(
-                "Нет голоса для: ${state.missingVoices.joinToString()}. Настройки → Синтез речи.",
-                color = MaterialTheme.colorScheme.error, fontSize = 14.sp, modifier = Modifier.padding(bottom = 8.dp),
+                "Нет голоса для: ${state.missingVoices.joinToString()}. Настройки телефона → Синтез речи.",
+                fontSize = 12.sp, color = p.danger, modifier = Modifier.padding(start = 4.dp, top = 4.dp),
             )
         }
 
-        DestinationRow(network, profile, state.destination, onDestination, onPickOther = { pickingDestination = true })
-        Spacer(Modifier.height(4.dp))
-        LineStrip(network, state, onTapStation = { confirmStation = it }, modifier = Modifier.weight(1f))
+        DestinationCard(network, state, atStation?.stationId, lineId, onChange = { pickingDestination = true })
 
-        Button(
-            onClick = {
-                when {
-                    !state.running -> onStart()
-                    state.demo -> onStop()
-                    else -> confirmStop = true
+        if (lineId != null) {
+            val line = network.line(lineId)
+            CardSurface(Modifier.fillMaxWidth().padding(top = 12.dp), padding = PaddingValues(start = 12.dp, end = 16.dp, top = 12.dp, bottom = 8.dp)) {
+                RouteWindow(network, line, atStation?.stationId, next?.stationId, nextKnown != null, state.destination)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { onOpenLine(line.id) }) { Text("Вся линия") }
                 }
-            },
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).height(52.dp),
-            colors = if (state.running) ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ) else ButtonDefaults.buttonColors(),
-        ) {
-            Text(
-                when {
-                    state.demo -> "Остановить демо"
-                    state.running -> "Остановить поездку"
-                    else -> "Начать поездку"
-                },
-                fontSize = 16.sp,
-            )
+            }
         }
+        Spacer(Modifier.height(16.dp))
     }
 
-    confirmStation?.let { id ->
-        AlertDialog(
-            onDismissRequest = { confirmStation = null },
-            title = { Text("Вы на станции ${network.ruName(id)}?") },
-            text = { Text("Позиция поезда будет исправлена на эту станцию.") },
-            confirmButton = { Button(onClick = { onAtStation(id); confirmStation = null }) { Text("Да, я здесь") } },
-            dismissButton = { TextButton(onClick = { confirmStation = null }) { Text("Отмена") } },
-        )
-    }
     if (confirmStop) {
         AlertDialog(
             onDismissRequest = { confirmStop = false },
-            title = { Text("Остановить поездку?") },
+            title = { Text("Завершить поездку?") },
             text = { Text("Объявления прекратятся. Запись сохранится в истории поездок.") },
-            confirmButton = { Button(onClick = { onStop(); confirmStop = false }) { Text("Остановить") } },
+            confirmButton = { TextButton(onClick = { onStop(); confirmStop = false }) { Text("Завершить", fontWeight = FontWeight.Bold) } },
             dismissButton = { TextButton(onClick = { confirmStop = false }) { Text("Продолжить поездку") } },
         )
     }
     if (pickingDestination) {
         StationPickerDialog(
             network, "Куда едете?",
+            shortcuts = listOfNotNull(
+                profile.homeStationId?.let { it to "Домой · ${network.ruName(it)}" },
+                profile.workStationId?.let { it to "На работу · ${network.ruName(it)}" },
+            ),
+            onClear = if (state.destination != null) ({ onDestination(null); pickingDestination = false }) else null,
             onPick = { onDestination(it); pickingDestination = false },
             onDismiss = { pickingDestination = false },
         )
@@ -303,70 +399,98 @@ fun TripScreen(
 }
 
 @Composable
-private fun NowCard(network: MetroNetwork, state: UiState, muted: Boolean, nowElapsedMs: Long, onToggleMute: () -> Unit) {
-    val e = state.estimate
-    val atStation = e?.current?.takeIf { e.atStationProbability > 0.5 }
-    val nextKnown = e?.next?.takeIf { it.probability >= 0.85 }
-    val outside = e?.outside == true
-    val searching = !outside && e?.current == null && e?.next == null
-    // A station is a calm, "primary" state; in the tunnel and while searching the card steps back.
-    val (container, content) = if (atStation != null) {
-        MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurface
+private fun DestinationCard(network: MetroNetwork, state: UiState, currentId: String?, lineId: String?, onChange: () -> Unit) {
+    val p = LocalPalette.current
+    val destination = state.destination
+    CardSurface(Modifier.fillMaxWidth().padding(top = 12.dp), onClick = onChange, padding = PaddingValues(horizontal = 16.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(36.dp).clip(CircleShape).background(p.canvas), contentAlignment = Alignment.Center) {
+                Icon(AppIcons.Flag, contentDescription = null, modifier = Modifier.size(20.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("Куда", fontSize = 12.sp, color = p.muted)
+                Text(destination?.let(network::ruName) ?: "Не выбрано", fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            // Stations left, when the destination is on the line we are on.
+            val left = if (destination != null && currentId != null && lineId != null) {
+                val stations = network.line(lineId).stations
+                val a = stations.indexOf(currentId)
+                val b = stations.indexOf(destination)
+                if (a >= 0 && b >= 0 && a != b) kotlin.math.abs(a - b) else null
+            } else null
+            Text(
+                when {
+                    left != null -> "ещё ${stationsCount(left)}"
+                    destination != null && destination == currentId -> "вы на месте"
+                    else -> "Изменить"
+                },
+                fontSize = 14.sp, color = p.muted,
+            )
+        }
     }
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = container, contentColor = content)) {
-        Row(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 12.dp, end = 4.dp)) {
-            Column(Modifier.weight(1f).padding(top = 4.dp)) {
-                Text(
-                    (if (state.demo) "ДЕМО · " else "") + when {
-                        outside -> "ВНЕ МЕТРО"
-                        searching -> "ИЩУ СТАНЦИЮ"
-                        atStation != null -> "СТАНЦИЯ"
-                        else -> "В ПУТИ"
-                    },
-                    fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp,
-                )
-                Text(
-                    when {
-                        atStation != null -> network.ruName(atStation.stationId)
-                        outside -> "Вы вышли из метро"
-                        nextKnown != null -> "→ ${network.ruName(nextKnown.stationId)}"
-                        searching -> "Жду сигнал сети"
-                        else -> "Между станциями"
-                    },
-                    fontSize = 24.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                )
-                if (atStation != null) {
-                    Text(
-                        nextKnown?.let { "Следующая: ${network.ruName(it.stationId)}" } ?: "Направление уточню на следующей станции",
-                        fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                if (outside) {
-                    Text("Поездка завершится сама через пару минут.", fontSize = 16.sp)
-                } else if (!state.demo) {
-                    val freshness = freshness(state, nowElapsedMs)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        freshness.text, fontSize = 12.sp,
-                        color = if (freshness.stale) MaterialTheme.colorScheme.error else content.copy(alpha = 0.8f),
-                    )
-                }
+}
+
+/** The stretch of the line that matters now: one station back, the current one, three ahead — in travel order. */
+@Composable
+private fun RouteWindow(network: MetroNetwork, line: Line, currentId: String?, nextId: String?, nextSure: Boolean, destination: String?) {
+    val stations = line.stations
+    val cur = stations.indexOf(currentId)
+    val nxt = stations.indexOf(nextId)
+    var direction by remember(line.id) { mutableIntStateOf(1) }
+    if (cur >= 0 && nxt >= 0 && nxt != cur) direction = if (nxt > cur) 1 else -1
+    val focus = if (cur >= 0) cur else nxt
+    if (focus < 0) return
+    val window = (-1..3).map { focus + it * direction }.filter { it in stations.indices }
+    val color = line.displayColor()
+    window.forEach { i ->
+        StationRow(
+            name = network.ruName(stations[i]), color = color,
+            isCurrent = i == cur, isNext = i == nxt, nextSure = nextSure, isDestination = stations[i] == destination,
+        )
+    }
+}
+
+@Composable
+private fun StationRow(name: String, color: Color, isCurrent: Boolean, isNext: Boolean, nextSure: Boolean, isDestination: Boolean, modifier: Modifier = Modifier) {
+    val p = LocalPalette.current
+    Row(modifier.fillMaxWidth().height(IntrinsicSize.Min).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(32.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
+            Box(Modifier.width(4.dp).fillMaxHeight().background(color))
+            Box(
+                Modifier.size(if (isCurrent) 22.dp else 14.dp).clip(CircleShape)
+                    .background(if (isCurrent || isNext) color else p.card)
+                    .border(3.dp, color, CircleShape),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        if (isDestination) {
+            Icon(AppIcons.Flag, contentDescription = "Цель поездки", modifier = Modifier.size(18.dp), tint = p.ink)
+            Spacer(Modifier.width(6.dp))
+        }
+        val tag: (@Composable () -> Unit)? = when {
+            isCurrent -> ({ Tag("вы здесь", color) })
+            isNext -> ({ Tag(if (nextSure) "далее" else "далее?", color) })
+            else -> null
+        }
+        val weight = if (isCurrent) FontWeight.Bold else FontWeight.Medium
+        // With a large system font the tag goes under the name: side by side it would break names mid-word.
+        if (LocalDensity.current.fontScale > 1.2f) {
+            Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
+                Text(name, fontWeight = weight, fontSize = 16.sp)
+                tag?.invoke()
             }
-            IconButton(onClick = onToggleMute) {
-                Icon(
-                    if (muted) AppIcons.VolumeOff else AppIcons.VolumeUp,
-                    contentDescription = if (muted) "Включить звук объявлений" else "Выключить звук объявлений",
-                )
-            }
+        } else {
+            Text(name, fontWeight = weight, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(vertical = 6.dp))
+            Spacer(Modifier.width(8.dp))
+            tag?.invoke()
         }
     }
 }
 
 private class Freshness(val text: String, val stale: Boolean)
 
-/** Tells the user the app is alive: how old the last location fix is. Stations are ~2–3 min apart. */
+/** Tells the rider the app is alive: how old the last location fix is. Stations are ~1–3 min apart. */
 private fun freshness(state: UiState, nowMs: Long): Freshness {
     fun ago(ms: Long): String {
         val s = (ms / 1000).coerceAtLeast(0)
@@ -375,160 +499,99 @@ private fun freshness(state: UiState, nowMs: Long): Freshness {
     val last = state.lastFixElapsedMs
     if (last == null) {
         val waited = state.startedElapsedMs?.let { nowMs - it } ?: 0
-        return if (waited > 60_000) Freshness("Нет точки уже ${ago(waited)}. Нажмите свою станцию в списке.", true)
+        return if (waited > 60_000) Freshness("Нет точки уже ${ago(waited)}. Нажмите «Не та станция» и укажите свою.", true)
         else Freshness("Жду первую точку геолокации: ${ago(waited)}", false)
     }
     val age = nowMs - last
     val accuracy = state.lastFixAccuracyMeters?.let { " · ±$it м" }.orEmpty()
-    return if (age > 240_000) Freshness("Точки нет ${ago(age)}. Ошиблось — нажмите свою станцию.", true)
+    return if (age > 240_000) Freshness("Точки нет ${ago(age)}. Если ошиблось — «Не та станция».", true)
     else Freshness("Точка ${ago(age)} назад$accuracy", false)
 }
 
-/** Where the user is going: gives the direction before the first station. Always visible, so it is discoverable. */
+// ------------------------------------------------------------------------------------------
+// Line: every station of one line. Browsing when idle, correcting the position during a ride.
+// ------------------------------------------------------------------------------------------
+
 @Composable
-private fun DestinationRow(
+fun LineScreen(
     network: MetroNetwork,
-    profile: Profile,
-    destination: String?,
-    onDestination: (String?) -> Unit,
-    onPickOther: () -> Unit,
+    state: UiState,
+    initialLineId: String,
+    onBack: () -> Unit,
+    onAtStation: (String) -> Unit,
+    /** Opens with the "are you at this station?" dialog (for screenshots). */
+    initialConfirmStation: String? = null,
 ) {
-    Row(
-        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("Куда:", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        @Composable
-        fun place(id: String, label: String, icon: ImageVector) = FilterChip(
-            selected = destination == id,
-            onClick = { onDestination(if (destination == id) null else id) },
-            leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
-            label = { Text(label, maxLines = 1) },
-        )
-        profile.homeStationId?.let { place(it, "Домой", Icons.Default.Home) }
-        profile.workStationId?.let { place(it, "Работа", AppIcons.Work) }
-        val other = destination?.takeIf { it != profile.homeStationId && it != profile.workStationId }
-        FilterChip(
-            selected = other != null,
-            onClick = { if (other != null) onDestination(null) else onPickOther() },
-            leadingIcon = { Icon(AppIcons.Flag, contentDescription = null, modifier = Modifier.size(18.dp)) },
-            label = {
-                val hasPlaces = profile.homeStationId != null || profile.workStationId != null
-                Text(other?.let(network::ruName) ?: if (hasPlaces) "Другая" else "Выбрать станцию", maxLines = 1)
-            },
-        )
-    }
-}
-
-@Composable
-private fun LineStrip(network: MetroNetwork, state: UiState, onTapStation: (String) -> Unit, modifier: Modifier) {
-    val estimate = state.estimate.takeIf { state.running }
-    val trackedLine = estimate?.current?.lineId ?: estimate?.next?.lineId
-    var selected by remember { mutableStateOf(trackedLine ?: network.lines.first().id) }
-    LaunchedEffect(trackedLine) { trackedLine?.let { selected = it } }
-
-    LineSwitcher(network.lines, selected) { selected = it }
-
+    val p = LocalPalette.current
+    var selected by remember { mutableStateOf(initialLineId) }
+    var confirmStation by remember { mutableStateOf(initialConfirmStation) }
     val line = network.line(selected)
-    val lineColor = line.displayColor()
+    val color = line.displayColor()
+    val estimate = state.estimate.takeIf { state.running }
     val currentId = estimate?.current?.takeIf { it.lineId == line.id && estimate.atStationProbability > 0.5 }?.stationId
     val next = estimate?.next?.takeIf { it.lineId == line.id }
+    val tappable = state.running && !state.demo
     val listState = rememberLazyListState()
     val focusIndex = line.stations.indexOf(currentId ?: next?.stationId)
     LaunchedEffect(focusIndex, selected) {
         if (focusIndex >= 0) listState.animateScrollToItem((focusIndex - 2).coerceAtLeast(0))
     }
-    val tappable = state.running && !state.demo
 
-    LazyColumn(modifier.fillMaxWidth().padding(top = 4.dp), state = listState) {
-        items(line.stations, key = { it }) { stationId ->
-            val isCurrent = stationId == currentId
-            val isNext = stationId == next?.stationId
-            Row(
-                Modifier.fillMaxWidth().height(IntrinsicSize.Min).heightIn(min = 48.dp)
-                    .clickable(enabled = tappable, onClickLabel = "Отметить, что я на этой станции") { onTapStation(stationId) }
-                    .padding(end = 2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.width(32.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                    Box(Modifier.width(4.dp).fillMaxHeight().background(lineColor))
-                    Box(
-                        Modifier.size(if (isCurrent) 22.dp else 14.dp).clip(CircleShape)
-                            .background(if (isCurrent || isNext) lineColor else MaterialTheme.colorScheme.surface)
-                            .border(3.dp, lineColor, CircleShape),
+    ScreenColumn {
+        TopBar(if (tappable) "Где вы сейчас?" else line.ruName(), onBack)
+        if (network.lines.size > 1) LineSwitcher(network.lines, selected) { selected = it }
+        Text(
+            if (tappable) "Нажмите станцию, на которой вы стоите."
+            else "${network.ruName(line.stations.first())} — ${network.ruName(line.stations.last())} · ${stationsCount(line.stations.size)}",
+            fontSize = 14.sp, color = p.muted, modifier = Modifier.padding(top = 12.dp, bottom = 8.dp),
+        )
+        CardSurface(Modifier.fillMaxWidth().weight(1f).padding(bottom = 16.dp), padding = PaddingValues(start = 12.dp, end = 16.dp, top = 8.dp, bottom = 8.dp)) {
+            LazyColumn(state = listState) {
+                items(line.stations, key = { it }) { id ->
+                    StationRow(
+                        name = network.ruName(id), color = color,
+                        isCurrent = id == currentId, isNext = id == next?.stationId,
+                        nextSure = (next?.probability ?: 0.0) >= 0.85, isDestination = id == state.destination,
+                        modifier = Modifier.clickable(enabled = tappable, onClickLabel = "Отметить, что я на этой станции") { confirmStation = id },
                     )
                 }
-                Spacer(Modifier.width(12.dp))
-                if (state.destination == stationId) {
-                    Icon(AppIcons.Flag, contentDescription = "Цель поездки", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(6.dp))
-                }
-                Text(
-                    network.ruName(stationId),
-                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                    fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f).padding(vertical = 6.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                when {
-                    isCurrent -> Badge("вы здесь", lineColor)
-                    isNext -> Badge(if ((next?.probability ?: 0.0) >= 0.85) "далее" else "далее?", lineColor)
-                }
-            }
-        }
-        if (tappable) {
-            item(key = "hint") {
-                Text(
-                    "Ошиблось? Нажмите станцию, где вы сейчас.",
-                    fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 8.dp),
-                )
             }
         }
     }
+
+    confirmStation?.let { id ->
+        AlertDialog(
+            onDismissRequest = { confirmStation = null },
+            title = { Text("Вы на станции ${network.ruName(id)}?") },
+            text = { Text("Позиция поезда будет исправлена на эту станцию.") },
+            confirmButton = { TextButton(onClick = { onAtStation(id); confirmStation = null }) { Text("Да, я здесь", fontWeight = FontWeight.Bold) } },
+            dismissButton = { TextButton(onClick = { confirmStation = null }) { Text("Отмена") } },
+        )
+    }
 }
 
-/** Lines as equal segments: number in the line colour (as on metro maps) plus the name. */
+/** One chip per line with its full name; the row scrolls, so it works for two lines and for twenty. */
 @Composable
 private fun LineSwitcher(lines: List<Line>, selected: String, onSelect: (String) -> Unit) {
-    val fits = lines.size <= 3
-    Row(
-        if (fits) Modifier.fillMaxWidth() else Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
+    val p = LocalPalette.current
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         lines.forEach { line ->
             val isSelected = line.id == selected
             Surface(
                 onClick = { onSelect(line.id) },
-                shape = RoundedCornerShape(12.dp),
-                color = if (isSelected) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent,
-                border = BorderStroke(1.dp, if (isSelected) Color.Transparent else MaterialTheme.colorScheme.outlineVariant),
-                modifier = (if (fits) Modifier.weight(1f) else Modifier.widthIn(max = 220.dp)).heightIn(min = 48.dp),
+                shape = RoundedCornerShape(Radius.control),
+                color = if (isSelected) p.card else Color.Transparent,
+                border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, if (isSelected) p.ink else p.outline),
+                contentColor = p.ink,
+                modifier = Modifier.heightIn(min = 48.dp),
             ) {
-                Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    // Grows with the system font size instead of clipping the number.
-                    Box(
-                        Modifier.defaultMinSize(24.dp, 24.dp).clip(CircleShape).background(line.displayColor()).padding(horizontal = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(line.id.take(2), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
+                Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    LineBadge(line, size = 24.dp)
                     Spacer(Modifier.width(8.dp))
-                    Text(
-                        line.ruName(), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                    )
+                    Text(line.ruName(), fontSize = 14.sp, maxLines = 1, fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium)
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun Badge(text: String, color: Color) {
-    Surface(shape = RoundedCornerShape(50), color = color, modifier = Modifier.padding(vertical = 4.dp)) {
-        Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp))
     }
 }
 
@@ -543,36 +606,35 @@ fun HistoryScreen(
     onShare: (TripInfo) -> Unit,
     onDelete: (TripInfo) -> Unit,
 ) {
+    val p = LocalPalette.current
     var deleting by remember { mutableStateOf<TripInfo?>(null) }
     ScreenColumn {
         TopBar("История поездок", onBack)
         if (trips.isEmpty()) {
-            Text(
-                "Пока пусто. Каждая поездка записывается сюда — её можно отправить для разбора.",
-                fontSize = 16.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 24.dp),
-            )
+            CardSurface(Modifier.fillMaxWidth().padding(top = 8.dp), color = p.tintCream) {
+                Text("Пока пусто", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text("Каждая поездка записывается сюда — её можно отправить для разбора.", fontSize = 14.sp, color = p.ink.copy(alpha = 0.72f))
+            }
             return@ScreenColumn
         }
         Text(
             "Запись содержит показания датчиков, геолокацию и видимые соты и Wi-Fi за время поездки.",
-            fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 8.dp),
+            fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 4.dp, bottom = 12.dp),
         )
-        LazyColumn {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(trips, key = { it.path }) { trip ->
-                Row(Modifier.fillMaxWidth().heightIn(min = 64.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-                        Text(trip.title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            trip.subtitle + if (trip.recording) " · идёт запись" else "",
-                            fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    IconButton(onClick = { onShare(trip) }) { Icon(Icons.Default.Share, contentDescription = "Отправить запись") }
-                    IconButton(onClick = { deleting = trip }, enabled = !trip.recording) {
-                        Icon(Icons.Default.Delete, contentDescription = "Удалить запись")
+                CardSurface(Modifier.fillMaxWidth(), padding = PaddingValues(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
+                            Text(trip.title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                            Text(trip.subtitle + if (trip.recording) " · идёт запись" else "", fontSize = 12.sp, color = p.muted)
+                        }
+                        IconButton(onClick = { onShare(trip) }) { Icon(Icons.Default.Share, contentDescription = "Отправить запись") }
+                        IconButton(onClick = { deleting = trip }, enabled = !trip.recording) {
+                            Icon(Icons.Default.Delete, contentDescription = "Удалить запись")
+                        }
                     }
                 }
-                HorizontalDivider()
             }
         }
     }
@@ -581,14 +643,14 @@ fun HistoryScreen(
             onDismissRequest = { deleting = null },
             title = { Text("Удалить запись?") },
             text = { Text("${trip.title} · ${trip.subtitle}") },
-            confirmButton = { TextButton(onClick = { onDelete(trip); deleting = null }) { Text("Удалить") } },
+            confirmButton = { TextButton(onClick = { onDelete(trip); deleting = null }) { Text("Удалить", fontWeight = FontWeight.Bold) } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Отмена") } },
         )
     }
 }
 
 // ------------------------------------------------------------------------------------------
-// Profile
+// Profile: places, voice, automation. Each group is its own card.
 // ------------------------------------------------------------------------------------------
 
 @Composable
@@ -608,21 +670,16 @@ fun ProfileScreen(
     onDemo: () -> Unit,
     onSignOut: () -> Unit,
 ) {
+    val p = LocalPalette.current
     var picking by remember { mutableStateOf<String?>(null) } // "home" | "work"
 
     ScreenColumn(scroll = true) {
         TopBar("Профиль", onBack)
 
-        Card(Modifier.fillMaxWidth()) {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        (account.name ?: account.email ?: "Г").take(1).uppercase(),
-                        color = MaterialTheme.colorScheme.onPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold,
-                    )
+        CardSurface(Modifier.fillMaxWidth().padding(top = 8.dp), color = p.tintBlue) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(48.dp).clip(CircleShape).background(p.ink), contentAlignment = Alignment.Center) {
+                    Text((account.name ?: account.email ?: "Г").take(1).uppercase(), color = p.onInk, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.width(16.dp))
                 Column {
@@ -633,57 +690,56 @@ fun ProfileScreen(
                             "apple.com" -> "Apple · ${account.email ?: "скрытый email"}"
                             else -> "Данные хранятся только на этом телефоне"
                         },
-                        fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 14.sp, color = p.ink.copy(alpha = 0.72f),
                     )
                 }
             }
         }
 
-        Spacer(Modifier.height(24.dp))
-        SectionTitle("Мои станции")
-        Text(
-            "Кнопки «Домой» и «Работа» на главном экране сразу задают направление поездки.",
-            fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(4.dp))
-        PlaceRow(Icons.Default.Home, "Дом", profile.homeStationId?.let(network::ruName), onClick = { picking = "home" }, onClear = { onSetHome(null) })
-        HorizontalDivider()
-        PlaceRow(AppIcons.Work, "Работа", profile.workStationId?.let(network::ruName), onClick = { picking = "work" }, onClear = { onSetWork(null) })
+        SectionTitle("Мои места")
+        CardSurface(Modifier.fillMaxWidth(), padding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+            PlaceRow(Icons.Default.Home, "Дом", profile.homeStationId?.let(network::ruName), onClick = { picking = "home" }, onClear = { onSetHome(null) })
+            HorizontalDivider(color = p.outline)
+            PlaceRow(AppIcons.Work, "Работа", profile.workStationId?.let(network::ruName), onClick = { picking = "work" }, onClear = { onSetWork(null) })
+        }
 
-        Spacer(Modifier.height(24.dp))
         SectionTitle("Озвучка")
-        SwitchRow("Объявления голосом", !profile.muted) { onToggleMute() }
-        SwitchRow("Русский", "ru" in profile.languages, enabled = profile.languages != listOf("ru")) { onToggleLanguage("ru") }
-        SwitchRow("English", "en" in profile.languages, enabled = profile.languages != listOf("en")) { onToggleLanguage("en") }
-        Spacer(Modifier.height(4.dp))
-        OutlinedButton(onClick = onTestVoice, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Проверить голос") }
+        CardSurface(Modifier.fillMaxWidth(), padding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+            SwitchRow("Объявления голосом", !profile.muted) { onToggleMute() }
+            HorizontalDivider(color = p.outline)
+            SwitchRow("Русский", "ru" in profile.languages, enabled = profile.languages != listOf("ru")) { onToggleLanguage("ru") }
+            HorizontalDivider(color = p.outline)
+            SwitchRow("English", "en" in profile.languages, enabled = profile.languages != listOf("en")) { onToggleLanguage("en") }
+        }
+        PillButton("Проверить голос", onTestVoice, Modifier.padding(top = 12.dp), icon = AppIcons.VolumeUp)
 
-        Spacer(Modifier.height(24.dp))
         SectionTitle("Автоматика")
-        SwitchRow("Начинать поездку у станции", profile.autoStart) { onToggleAutoStart() }
-        Text(
-            "Поездка запускается сама, когда вы подходите к станции метро, и молчит, пока вы не поедете. " +
-                "Нужен доступ к геолокации «Разрешать всегда». Завершается поездка сама в любом случае: " +
-                "через пару минут после выхода из метро.",
-            fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        CardSurface(Modifier.fillMaxWidth(), padding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
+            SwitchRow("Начинать поездку у станции", profile.autoStart) { onToggleAutoStart() }
+            Text(
+                "Запускается сама, когда вы подходите к станции, и молчит, пока вы не поедете. Нужен доступ к геолокации " +
+                    "«Разрешать всегда». Завершается поездка сама в любом случае — через пару минут после выхода из метро.",
+                fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(bottom = 12.dp),
+            )
+        }
 
-        Spacer(Modifier.height(24.dp))
         SectionTitle("Проверка")
-        Text(
-            "Демо-поездка проигрывает выдуманный маршрут с пересадкой в ускоренном темпе: видно экран и слышно объявления, никуда не выезжая.",
-            fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = onDemo, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Запустить демо-поездку") }
+        CardSurface(Modifier.fillMaxWidth(), color = p.tintCream) {
+            Text("Демо-поездка", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Выдуманный маршрут с пересадкой в ускоренном темпе: видно экран и слышно объявления, никуда не выезжая.",
+                fontSize = 14.sp, color = p.ink.copy(alpha = 0.72f),
+            )
+            Spacer(Modifier.height(12.dp))
+            PillButton("Запустить", onDemo, icon = Icons.Default.PlayArrow, filled = true)
+        }
 
         if (!account.isGuest || signInAvailable) {
-            Spacer(Modifier.height(24.dp))
-            TextButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+            TextButton(onClick = onSignOut, modifier = Modifier.fillMaxWidth().padding(top = 16.dp).heightIn(min = 48.dp)) {
                 Text(if (account.isGuest) "Войти в аккаунт" else "Выйти из аккаунта")
             }
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(24.dp))
     }
 
     picking?.let { which ->
@@ -701,49 +757,64 @@ fun ProfileScreen(
 
 @Composable
 private fun PlaceRow(icon: ImageVector, label: String, value: String?, onClick: () -> Unit, onClear: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 60.dp).clickable(onClick = onClick).padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.width(16.dp))
+    val p = LocalPalette.current
+    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable(onClick = onClick), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(36.dp).clip(CircleShape).background(p.canvas), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+        }
+        Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(label, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value ?: "Выбрать станцию", fontSize = 16.sp, fontWeight = if (value != null) FontWeight.SemiBold else FontWeight.Normal)
+            Text(label, fontSize = 12.sp, color = p.muted)
+            Text(value ?: "Выбрать станцию", fontSize = 16.sp, fontWeight = if (value != null) FontWeight.SemiBold else FontWeight.Medium)
         }
         if (value != null) TextButton(onClick = onClear) { Text("Сбросить") }
+        else Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = p.muted)
     }
 }
 
 @Composable
 private fun SwitchRow(label: String, checked: Boolean, enabled: Boolean = true, onToggle: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(enabled = enabled, onClick = onToggle),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, fontSize = 16.sp, modifier = Modifier.weight(1f))
+    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = enabled, onClick = onToggle), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
         Switch(checked = checked, onCheckedChange = null, enabled = enabled)
     }
 }
 
+/**
+ * Station list grouped by line. [shortcuts] (id to label) go on top — home, work; [onClear] adds "no destination".
+ */
 @Composable
-fun StationPickerDialog(network: MetroNetwork, title: String, onPick: (String) -> Unit, onDismiss: () -> Unit) {
+fun StationPickerDialog(
+    network: MetroNetwork,
+    title: String,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit,
+    shortcuts: List<Pair<String, String>> = emptyList(),
+    onClear: (() -> Unit)? = null,
+) {
+    val p = LocalPalette.current
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
+        title = { Text(title, fontWeight = FontWeight.SemiBold) },
         text = {
-            LazyColumn(Modifier.heightIn(max = 420.dp)) {
+            LazyColumn(Modifier.heightIn(max = 440.dp)) {
+                items(shortcuts, key = { "s-${it.first}" }) { (id, label) ->
+                    Text(label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { onPick(id) }.padding(vertical = 12.dp))
+                }
+                if (onClear != null) item(key = "clear") {
+                    Text("Без цели", fontSize = 16.sp, color = p.muted, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClick = onClear).padding(vertical = 12.dp))
+                }
                 network.lines.forEach { line ->
                     item(key = "h-${line.id}") {
                         Row(Modifier.padding(top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(12.dp).clip(CircleShape).background(line.displayColor()))
+                            LineBadge(line, size = 22.dp)
                             Spacer(Modifier.width(8.dp))
-                            Text(line.ruName(), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                            Text(line.ruName(), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = p.ink)
                         }
                     }
                     items(line.stations, key = { "${line.id}-$it" }) { id ->
                         Text(
-                            network.ruName(id), fontSize = 16.sp,
+                            network.ruName(id), fontSize = 16.sp, color = p.ink,
                             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { onPick(id) }.padding(vertical = 12.dp),
                         )
                     }
@@ -752,4 +823,49 @@ fun StationPickerDialog(network: MetroNetwork, title: String, onPick: (String) -
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
     )
+}
+
+// ------------------------------------------------------------------------------------------
+// Welcome / sign-in (shown only when a sign-in backend is configured)
+// ------------------------------------------------------------------------------------------
+
+@Composable
+fun WelcomeScreen(
+    busy: Boolean,
+    message: String?,
+    onGoogle: () -> Unit,
+    onApple: () -> Unit,
+    onGuest: () -> Unit,
+) {
+    val p = LocalPalette.current
+    ScreenColumn {
+        Column(Modifier.fillMaxSize().padding(vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(Modifier.weight(1f))
+            CardSurface(color = p.tintCream, padding = PaddingValues(24.dp)) {
+                ModeIllustration("subway", Color(0xFFEB0000), Modifier.size(width = 150.dp, height = 165.dp))
+            }
+            Spacer(Modifier.height(24.dp))
+            Text("Metro Voice", fontSize = 36.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Станции — прямо в наушники.\nРаботает в тоннелях без интернета.",
+                textAlign = TextAlign.Center, color = p.muted, fontSize = 16.sp,
+            )
+            Spacer(Modifier.weight(1f))
+            PrimaryButton("Начать без входа", onGuest, Modifier.fillMaxWidth(), enabled = !busy)
+            Spacer(Modifier.height(12.dp))
+            PillButton("Войти через Google", onGoogle, Modifier.fillMaxWidth(), minHeight = 56.dp)
+            Spacer(Modifier.height(12.dp))
+            PillButton("Войти через Apple", onApple, Modifier.fillMaxWidth(), minHeight = 56.dp)
+            message?.let {
+                Spacer(Modifier.height(8.dp))
+                Text(it, color = p.danger, textAlign = TextAlign.Center, fontSize = 14.sp)
+            }
+            Spacer(Modifier.height(12.dp))
+            Text(
+                "Вход нужен, чтобы профиль пережил смену телефона. Записи поездок хранятся только на устройстве.",
+                textAlign = TextAlign.Center, fontSize = 12.sp, color = p.muted,
+            )
+        }
+    }
 }

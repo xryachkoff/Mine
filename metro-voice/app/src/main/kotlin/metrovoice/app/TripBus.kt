@@ -94,7 +94,7 @@ object TripHistory {
                     subtitle = listOfNotNull(
                         date.takeIf { route != null },
                         minutes?.let { "$it мин" },
-                        stations.size.takeIf { it >= 2 }?.let { "$it ${pluralStations(it)}" },
+                        stations.size.takeIf { it >= 2 }?.let { metrovoice.app.ui.stationsCount(it) },
                         size,
                     ).joinToString(" · "),
                     recording = f.absolutePath == recordingPath,
@@ -105,12 +105,5 @@ object TripHistory {
         val f = File(path)
         stationsFile(f).delete()
         f.delete()
-    }
-
-    private fun pluralStations(n: Int): String = when {
-        n % 100 in 11..14 -> "станций"
-        n % 10 == 1 -> "станция"
-        n % 10 in 2..4 -> "станции"
-        else -> "станций"
     }
 }

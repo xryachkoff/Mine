@@ -27,6 +27,8 @@ data class Line(
     val stations: List<String>,
     /** Measured moving time per segment (size = stations.size - 1). Null = estimate from distance. */
     val segmentSeconds: List<Double>? = null,
+    /** Kind of transport: "subway", later "tram", "bus", "light_rail". Lines are grouped by it in the UI. */
+    val mode: String = "subway",
 )
 
 @Serializable
@@ -40,6 +42,8 @@ data class Transfer(
 @Serializable
 data class MetroGraph(
     val city: String,
+    /** Display name of the city by language. */
+    val cityName: Names = emptyMap(),
     val stations: List<Station>,
     val lines: List<Line>,
     val transfers: List<Transfer> = emptyList(),

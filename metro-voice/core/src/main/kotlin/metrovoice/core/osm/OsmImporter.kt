@@ -47,6 +47,7 @@ object OsmImporter {
     /** data/overrides/<city>.json: {"stations": {id: {lang: name}}, "lines": {id: {lang: name}}} */
     @Serializable
     data class NameOverrides(
+        val city: Names = emptyMap(),
         val stations: Map<String, Names> = emptyMap(),
         val lines: Map<String, Names> = emptyMap(),
     ) {
@@ -89,6 +90,7 @@ object OsmImporter {
                 name = lineNames + options.overrides.lines[lineId].orEmpty(),
                 color = rel.tags["colour"],
                 stations = ids,
+                mode = rel.tags["route"] ?: "subway",
             )
         }
 
@@ -107,7 +109,7 @@ object OsmImporter {
         }
         val unknown = options.overrides.stations.keys - stations.keys
         require(unknown.isEmpty()) { "Overrides for unknown stations: $unknown" }
-        return MetroGraph(options.city, finalStations, lines, transfers)
+        return MetroGraph(options.city, options.overrides.city, finalStations, lines, transfers)
     }
 
     private fun OsmMember.isStop() = role == "stop" || role.startsWith("stop_")

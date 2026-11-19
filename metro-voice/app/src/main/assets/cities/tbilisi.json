@@ -1,5 +1,10 @@
 {
     "city": "tbilisi",
+    "cityName": {
+        "ru": "Тбилиси",
+        "en": "Tbilisi",
+        "ka": "თბილისი"
+    },
     "stations": [
         {
             "id": "varketili",

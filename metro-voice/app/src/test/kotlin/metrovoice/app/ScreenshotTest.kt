@@ -7,6 +7,9 @@ import androidx.compose.ui.test.onRoot
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import metrovoice.app.ui.HistoryScreen
+import metrovoice.app.ui.HomeScreen
+import metrovoice.app.ui.LineScreen
+import metrovoice.app.ui.LocalPalette
 import metrovoice.app.ui.MetroTheme
 import metrovoice.app.ui.ProfileScreen
 import metrovoice.app.ui.StationPickerDialog
@@ -26,7 +29,7 @@ import org.robolectric.annotation.GraphicsMode
 import java.io.File
 
 /**
- * Renders the real screens with sample state into PNGs (screenshots/…).
+ * Renders the real screens with sample state into PNGs (docs/screenshots/…).
  * Run: ./gradlew :app:recordRoborazziDebug
  */
 @OptIn(com.github.takahirom.roborazzi.ExperimentalRoborazziApi::class)
@@ -40,7 +43,7 @@ class ScreenshotTest {
     private val profile = Profile(homeStationId = "didube", workStationId = "rustaveli", autoStart = true)
 
     private fun shot(name: String, dark: Boolean = false, wholeScreen: Boolean = false, content: @Composable () -> Unit) {
-        compose.setContent { MetroTheme(dark = dark) { Surface { content() } } }
+        compose.setContent { MetroTheme(dark = dark) { Surface(color = LocalPalette.current.canvas) { content() } } }
         val path = "../docs/screenshots/$name.png"
         if (wholeScreen) captureScreenRoboImage(path) else compose.onRoot().captureRoboImage(path)
     }
@@ -49,52 +52,71 @@ class ScreenshotTest {
     private val riding = UiState(
         running = true,
         phase = "STOPPED",
-        estimate = Estimate(
-            atStationProbability = 0.96,
-            current = StationBelief("rustaveli", "1", 0.94),
-            next = StationBelief("marjanishvili", "1", 0.91),
-            hypothesisCount = 4,
-        ),
+        estimate = Estimate(0.96, StationBelief("rustaveli", "1", 0.94), StationBelief("marjanishvili", "1", 0.91), 4),
         destination = "didube",
         startedElapsedMs = now - 400_000,
         lastFixElapsedMs = now - 12_000,
-        lastFixAccuracyMeters = 140,
+        lastFixAccuracyMeters = 40,
     )
     private val inTunnel = riding.copy(
         estimate = Estimate(0.03, StationBelief("rustaveli", "1", 0.02), StationBelief("marjanishvili", "1", 0.95), 3),
-        lastFixElapsedMs = now - 95_000,
+        lastFixElapsedMs = now - 55_000,
     )
 
     @Composable
-    private fun Trip(state: UiState, profile: Profile = this.profile, confirm: String? = null) =
-        TripScreen(network, state, profile, now, {}, {}, {}, {}, {}, {}, {}, initialConfirmStation = confirm)
+    private fun Home(profile: Profile = this.profile, destination: String? = "didube") =
+        HomeScreen(network, profile, destination, {}, {}, {}, {}, {}, {}, {}, {})
 
-    @Test fun welcome() = shot("1-welcome") {
-        WelcomeScreen(busy = false, message = null, onGoogle = {}, onApple = {}, onGuest = {})
+    @Composable
+    private fun Trip(state: UiState, profile: Profile = this.profile) =
+        TripScreen(network, state, profile, now, {}, {}, {}, {}, {})
+
+    @Test fun home() = shot("01-home") { Home() }
+
+    @Test fun homeFirstRun() = shot("02-home-first-run") { Home(Profile(), null) }
+
+    @Test fun homeDark() = shot("03-home-dark", dark = true) { Home() }
+
+    @Test fun tripAtStation() = shot("04-trip-station") { Trip(riding) }
+
+    @Test fun tripAtStationDark() = shot("05-trip-station-dark", dark = true) { Trip(riding) }
+
+    @Test fun tripInTunnel() = shot("06-trip-tunnel") { Trip(inTunnel) }
+
+    @Test fun tripSearching() = shot("07-trip-searching") {
+        Trip(UiState(running = true, startedElapsedMs = now - 20_000), profile.copy(muted = true))
     }
 
-    @Test fun tripIdle() = shot("2-trip-idle") { Trip(UiState()) }
-
-    @Test fun tripIdleFirstRun() = shot("2b-trip-first-run") { Trip(UiState(), Profile()) }
-
-    @Test fun tripRiding() = shot("3-trip-riding") { Trip(riding) }
-
-    @Test fun tripRidingDark() = shot("4-trip-riding-dark", dark = true) { Trip(riding) }
-
-    @Test fun profileScreen() = shot("5-profile") {
-        ProfileScreen(
-            network, Account("u1", "Ника Б.", "nika@example.com", "google.com"), profile, signInAvailable = true,
-            onBack = {}, onSetHome = {}, onSetWork = {}, onToggleMute = {}, onToggleLanguage = {}, onTestVoice = {}, onToggleAutoStart = {}, onDemo = {}, onSignOut = {},
+    @Test fun tripLongName() = shot("08-trip-long-name") {
+        Trip(
+            riding.copy(
+                estimate = Estimate(0.97, StationBelief("technical-university", "2", 0.96), StationBelief("medical-university", "2", 0.5), 4),
+                destination = "delisi", lastFixElapsedMs = now - 320_000,
+            ),
         )
     }
 
-    @Test fun stationPicker() = shot("6-station-picker", wholeScreen = true) {
-        StationPickerDialog(network, "Станция у дома", onPick = {}, onDismiss = {})
+    @Test fun leftTheMetro() = shot("09-left-the-metro") {
+        Trip(riding.copy(estimate = Estimate(0.0, null, null, 0, outside = true)))
     }
 
-    @Test fun tripInTunnel() = shot("7-trip-in-tunnel", dark = true) { Trip(inTunnel) }
+    @Test fun line() = shot("10-line") { LineScreen(network, UiState(), "1", {}, {}) }
 
-    @Test fun history() = shot("8-history") {
+    @Test fun lineCorrection() = shot("11-line-correct-position", dark = true) { LineScreen(network, riding, "1", {}, {}) }
+
+    @Test fun confirmStation() = shot("12-confirm-station", wholeScreen = true) {
+        LineScreen(network, riding, "1", {}, {}, initialConfirmStation = "marjanishvili")
+    }
+
+    @Test fun profileScreen() = shot("13-profile") {
+        ProfileScreen(
+            network, Account("u1", "Ника Б.", "nika@example.com", "google.com"), profile, signInAvailable = true,
+            onBack = {}, onSetHome = {}, onSetWork = {}, onToggleMute = {}, onToggleLanguage = {}, onTestVoice = {},
+            onToggleAutoStart = {}, onDemo = {}, onSignOut = {},
+        )
+    }
+
+    @Test fun history() = shot("14-history") {
         HistoryScreen(
             trips = listOf(
                 TripInfo("a", "Руставели → Дидубе", "17 ноября, 18:42 · 31 мин · 6 станций · 4,2 МБ", recording = false),
@@ -105,24 +127,30 @@ class ScreenshotTest {
         )
     }
 
-    @Test fun confirmStation() = shot("9-confirm-station", wholeScreen = true) { Trip(riding, confirm = "marjanishvili") }
-
-    @Test fun staleFix() = shot("10-no-fix-warning") {
-        Trip(inTunnel.copy(lastFixElapsedMs = now - 320_000, destination = "technical-university"), profile.copy(muted = true))
+    @Test fun stationPicker() = shot("15-station-picker", wholeScreen = true) {
+        StationPickerDialog(
+            network, "Куда едете?", onPick = {}, onDismiss = {},
+            shortcuts = listOf("didube" to "Домой · Дидубе", "rustaveli" to "На работу · Руставели"), onClear = {},
+        )
     }
 
-    @Test fun leftTheMetro() = shot("13-left-the-metro") {
-        Trip(riding.copy(estimate = Estimate(0.0, null, null, 0, outside = true)))
+    @Test fun welcome() = shot("16-welcome") {
+        WelcomeScreen(busy = false, message = null, onGoogle = {}, onApple = {}, onGuest = {})
     }
 
     /** Accessibility check: system font at 150%. */
     @Test fun largeFont() {
         RuntimeEnvironment.setFontScale(1.5f)
-        shot("11-large-font") { Trip(riding) }
+        shot("17-large-font") { Trip(riding) }
+    }
+
+    @Test fun largeFontHome() {
+        RuntimeEnvironment.setFontScale(1.5f)
+        shot("18-large-font-home") { Home() }
     }
 
     /** Unfolded foldable / small tablet. */
     @Test
     @Config(sdk = [34], qualifiers = "w800dp-h900dp-xhdpi")
-    fun unfolded() = shot("12-unfolded") { Trip(riding) }
+    fun unfolded() = shot("19-unfolded") { Trip(riding) }
 }

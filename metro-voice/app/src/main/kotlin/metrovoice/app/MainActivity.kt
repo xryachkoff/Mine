@@ -38,6 +38,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import metrovoice.app.ui.HistoryScreen
+import metrovoice.app.ui.HomeScreen
+import metrovoice.app.ui.LineScreen
 import metrovoice.app.ui.MetroTheme
 import metrovoice.app.ui.ProfileScreen
 import metrovoice.app.ui.TripScreen
@@ -61,7 +63,7 @@ class MainActivity : ComponentActivity() {
         val network = CityRepository.load(this)
         setContent {
             MetroTheme {
-                Surface(Modifier.fillMaxSize()) {
+                Surface(Modifier.fillMaxSize(), color = metrovoice.app.ui.LocalPalette.current.canvas) {
                     if (network == null) {
                         Text("Нет данных города (assets/cities/${CityRepository.DEFAULT_CITY}.json).", Modifier.padding(24.dp))
                     } else {
@@ -80,7 +82,7 @@ class MainActivity : ComponentActivity() {
         val scope = rememberCoroutineScope()
         var busy by rememberSaveable { mutableStateOf(false) }
         var message by rememberSaveable { mutableStateOf<String?>(null) }
-        var screen by rememberSaveable { mutableStateOf("trip") }
+        var screen by rememberSaveable { mutableStateOf("main") }
 
         var notice by rememberSaveable { mutableStateOf<Notice?>(null) }
 
@@ -155,13 +157,13 @@ class MainActivity : ComponentActivity() {
                 onGuest = { AuthManager.continueAsGuest(this) },
             )
             screen == "profile" -> {
-                BackHandler { screen = "trip" }
+                BackHandler { screen = "main" }
                 ProfileScreen(
                     network = network,
                     account = acc,
                     profile = profile,
                     signInAvailable = AuthManager.isConfigured(this),
-                    onBack = { screen = "trip" },
+                    onBack = { screen = "main" },
                     onSetHome = { ProfileStore.setHome(this, it) },
                     onSetWork = { ProfileStore.setWork(this, it) },
                     onToggleMute = { ProfileStore.setMuted(this, !profile.muted) },
@@ -176,35 +178,46 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     onDemo = {
-                        TripService.stop(this)
-                        DemoRunner.start(this, network)
-                        screen = "trip"
+                        startDemo()
+                        screen = "main"
                     },
                     onSignOut = {
                         AuthManager.signOut(this)
-                        screen = "trip"
+                        screen = "main"
                     },
                 )
             }
             screen == "history" -> {
-                BackHandler { screen = "trip" }
+                BackHandler { screen = "main" }
                 var version by remember { mutableStateOf(0) }
                 val trips = remember(version, state.running) {
                     TripHistory.list(this, network, state.tripFile.takeIf { state.running })
                 }
                 HistoryScreen(
                     trips = trips,
-                    onBack = { screen = "trip" },
+                    onBack = { screen = "main" },
                     onShare = { shareTrip(File(it.path)) },
                     onDelete = { TripHistory.delete(it.path); version++ },
                 )
             }
-            else -> {
+            screen.startsWith("line:") -> {
+                BackHandler { screen = "main" }
+                LineScreen(
+                    network = network,
+                    state = state,
+                    initialLineId = screen.removePrefix("line:").takeIf { id -> network.lines.any { it.id == id } } ?: network.lines.first().id,
+                    onBack = { screen = "main" },
+                    onAtStation = {
+                        TripBus.commands.tryEmit(Command.AtStation(it))
+                        screen = "main"
+                    },
+                )
+            }
+            state.running -> {
                 // Ticks once a second so the "last fix N s ago" line stays honest.
                 var now by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
-                val running = state.running
-                LaunchedEffect(running) {
-                    while (running) {
+                LaunchedEffect(Unit) {
+                    while (true) {
                         now = SystemClock.elapsedRealtime()
                         delay(1_000)
                     }
@@ -214,19 +227,38 @@ class MainActivity : ComponentActivity() {
                     state = state,
                     profile = profile,
                     nowElapsedMs = now,
-                    onStart = { permissionLauncher.launch(requiredPermissions) },
                     onStop = { if (state.demo) DemoRunner.stop() else TripService.stop(this) },
-                    onHistory = { screen = "history" },
                     onProfile = { screen = "profile" },
-                    onAtStation = { TripBus.commands.tryEmit(Command.AtStation(it)) },
-                    onDestination = { id ->
-                        TripBus.update { it.copy(destination = id) }
-                        TripBus.commands.tryEmit(Command.Destination(id))
-                    },
+                    onOpenLine = { screen = "line:$it" },
+                    onDestination = ::setDestination,
                     onToggleMute = { ProfileStore.setMuted(this, !profile.muted) },
                 )
             }
+            else -> HomeScreen(
+                network = network,
+                profile = profile,
+                destination = state.destination,
+                onStart = { permissionLauncher.launch(requiredPermissions) },
+                onDemo = ::startDemo,
+                onHistory = { screen = "history" },
+                onProfile = { screen = "profile" },
+                onOpenLine = { screen = "line:$it" },
+                onDestination = ::setDestination,
+                onSetHome = { ProfileStore.setHome(this, it) },
+                onSetWork = { ProfileStore.setWork(this, it) },
+            )
         }
+    }
+
+    private fun setDestination(id: String?) {
+        TripBus.update { it.copy(destination = id) }
+        TripBus.commands.tryEmit(Command.Destination(id))
+    }
+
+    private fun startDemo() {
+        val network = CityRepository.load(this) ?: return
+        TripService.stop(this)
+        DemoRunner.start(this, network)
     }
 
     private var voiceTester: Speaker? = null
