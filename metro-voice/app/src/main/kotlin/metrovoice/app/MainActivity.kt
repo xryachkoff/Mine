@@ -57,6 +57,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         ProfileStore.init(this)
         AuthManager.init(this)
+        AutoStart.sync(this) // geofences do not survive a reinstall or cleared Play services data
         val network = CityRepository.load(this)
         setContent {
             MetroTheme {
@@ -95,6 +96,24 @@ class MainActivity : ComponentActivity() {
                     if (!fine) notice = Notice.APPROXIMATE
                     TripService.start(this)
                 }
+            }
+        }
+
+        // Auto-start needs "allow all the time", which Android only grants in a second, separate step.
+        fun enableAutoStart() {
+            ProfileStore.setAutoStart(this, true)
+            AutoStart.sync(this)
+        }
+        val backgroundLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted || AutoStart.hasBackgroundLocation(this)) enableAutoStart() else notice = Notice.NEEDS_ALWAYS
+        }
+        val autoStartLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+            val fine = granted[Manifest.permission.ACCESS_FINE_LOCATION] == true || hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+            when {
+                !fine -> notice = Notice.NO_LOCATION
+                AutoStart.hasBackgroundLocation(this) -> enableAutoStart()
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> backgroundLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                else -> enableAutoStart()
             }
         }
 
@@ -148,6 +167,14 @@ class MainActivity : ComponentActivity() {
                     onToggleMute = { ProfileStore.setMuted(this, !profile.muted) },
                     onToggleLanguage = { ProfileStore.toggleLanguage(this, it) },
                     onTestVoice = { testVoice(network) },
+                    onToggleAutoStart = {
+                        if (profile.autoStart) {
+                            ProfileStore.setAutoStart(this, false)
+                            AutoStart.sync(this)
+                        } else {
+                            autoStartLauncher.launch(requiredPermissions)
+                        }
+                    },
                     onDemo = {
                         TripService.stop(this)
                         DemoRunner.start(this, network)
@@ -243,6 +270,10 @@ private enum class Notice(val title: String, val text: String) {
     APPROXIMATE(
         "Включите точное местоположение",
         "С приблизительной геолокацией (точность около 3 км) станции не различить. Поездка записывается, но объявлений может не быть. Настройки → Разрешения → Местоположение → «Точное местоположение».",
+    ),
+    NEEDS_ALWAYS(
+        "Нужен доступ «Разрешать всегда»",
+        "Чтобы поездка начиналась сама у станции, приложению нужна геолокация в фоне. Настройки → Разрешения → Местоположение → «Разрешать всегда». Вне поездки приложение не следит за вами: о приближении к станции ему сообщает система.",
     ),
     LOCATION_OFF(
         "Геолокация выключена",

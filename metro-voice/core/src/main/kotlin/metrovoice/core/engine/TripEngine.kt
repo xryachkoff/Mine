@@ -39,9 +39,12 @@ class TripEngine(
         handlePhase(change)
     }
 
-    fun onLocation(lat: Double, lon: Double, accuracyMeters: Double) {
+    fun onLocation(tSeconds: Double, lat: Double, lon: Double, accuracyMeters: Double) {
         // Never gated by the motion phase: a detector stuck in MOVING must not blind the tracker.
-        tracker.onFix(lat, lon, accuracyMeters)
+        val wasOutside = tracker.outside
+        tracker.onFix(lat, lon, accuracyMeters, tSeconds)
+        // Out of the metro: the next ride starts from a clean slate (the same station may be announced again).
+        if (tracker.outside && !wasOutside) announcer.reset()
         publishStanding()
     }
 
@@ -82,7 +85,7 @@ class TripEngine(
             Phase.STOPPED -> {
                 val since = movingSince
                 if (change.previous == Phase.MOVING && since != null) {
-                    tracker.onStop(movedSeconds = t - since)
+                    tracker.onStop(movedSeconds = t - since, atSeconds = t)
                     movingSince = null
                     publishStanding()
                 }

@@ -34,6 +34,8 @@ data class Estimate(
     val current: StationBelief?,
     val next: StationBelief?,
     val hypothesisCount: Int,
+    /** The rider has left the metro (accurate fixes away from every station): nothing is tracked. */
+    val outside: Boolean = false,
 )
 
 /**
@@ -78,16 +80,45 @@ class Tracker(
         val arriveOnFix: Double = 0.9,
         /** How many stations a fix may jump ahead of the believed position. */
         val maxMissedStations: Int = 3,
+        /** Prior that the phone gets a fix inside a tunnel at all, relative to at a station. */
+        val tunnelFixPrior: Double = 0.5,
         /** Probability that a fix is garbage (cell handover, stale cache): keeps one outlier from wiping beliefs. */
         val fixOutlier: Double = 1e-3,
         /** Direction prior floor when the direction is inferred from the previous position. */
         val directionFloor: Double = 0.05,
+        /**
+         * Fixes taken at a station land within this distance of its node (first real ride: 28–78 m);
+         * farther than this plus twice the accuracy is "not at a station" (same ride, on the street: 223–282 m).
+         */
+        val stationZoneMeters: Double = 150.0,
+        /** Accuracy needed for a fix to bring the rider back into the metro after walking out. */
+        val reentryAccuracyMeters: Double = 100.0,
+        /** Slow fixes away from all stations for this long mean the rider walked out of the metro. */
+        val leaveAfterSeconds: Double = 90.0,
+        /** Above this speed the rider is still on a train (a fix inside a tunnel), not on foot. */
+        val walkingSpeedMps: Double = 4.0,
+        /** A fix this recent can veto an "arrived at station" conclusion drawn from motion alone. */
+        val fixVetoSeconds: Double = 10.0,
+        /** Fixes this close to the previous one, this soon after it, are the same evidence repeated. */
+        val sameFixMeters: Double = 30.0,
+        val sameFixSeconds: Double = 30.0,
         val pruneBelow: Double = 1e-4,
         val maxHypotheses: Int = 300,
     )
 
     private var hypotheses: List<Hypothesis> = emptyList()
     private var lastFix: Triple<Double, Double, Double>? = null
+
+    private class FixObs(val lat: Double, val lon: Double, val sigma: Double, val t: Double?)
+    /** Last fix that updated the beliefs / last fix received at all. */
+    private var processedFix: FixObs? = null
+    private var recentFix: FixObs? = null
+    /** First of the current run of fixes away from every station. */
+    private var farSince: FixObs? = null
+
+    /** True after the rider walked out of the metro; cleared by a fix at a station or a tap. */
+    var outside: Boolean = false
+        private set
 
     /** Station the user is heading to ("home", "work"), possibly on another line. */
     var destination: String? = null
@@ -101,6 +132,10 @@ class Tracker(
         hypotheses = emptyList()
         destination = null
         lastFix = null
+        processedFix = null
+        recentFix = null
+        farSince = null
+        outside = false
     }
 
     /**
@@ -129,6 +164,10 @@ class Tracker(
             }
         }
         hypotheses = normalize(seeded.map(::applyDestination))
+        // The tap is the truth for now: forget "left the metro" and let the next fix speak again.
+        outside = false
+        farSince = null
+        processedFix = null
     }
 
     /** User says "I am going towards X" (destination or terminus). Keeps only consistent hypotheses. */
@@ -144,21 +183,65 @@ class Tracker(
      * must work even when the motion detector is wrong. A fix at the next station along the line both
      * moves the belief there and tells the direction.
      */
-    fun onFix(lat: Double, lon: Double, accuracyMeters: Double) {
-        // The network provider repeats the same cached position; counting it again would fake certainty.
+    fun onFix(lat: Double, lon: Double, accuracyMeters: Double, atSeconds: Double? = null) {
+        val sigma = max(accuracyMeters, config.minFixSigmaMeters)
+        val obs = FixObs(lat, lon, sigma, atSeconds)
+        recentFix = obs
+        if (detectLeaving(obs, accuracyMeters)) return
+
+        // The provider repeats positions (cached, or the rider simply stands still). Counting the same
+        // evidence again and again turns a small bias into false certainty — seen on a real ride.
         val key = Triple(lat, lon, accuracyMeters)
         if (key == lastFix) return
         lastFix = key
+        val last = processedFix
+        if (last != null && hypotheses.isNotEmpty() && distanceMeters(last.lat, last.lon, lat, lon) < config.sameFixMeters) {
+            val dt = if (atSeconds != null && last.t != null) atSeconds - last.t else 0.0
+            if (dt < config.sameFixSeconds) return
+        }
+        processedFix = obs
 
-        val sigma = max(accuracyMeters, config.minFixSigmaMeters)
-        val fresh = seedFromFix(lat, lon, sigma).map(::applyDestination)
         if (hypotheses.isEmpty()) {
-            hypotheses = normalize(fresh)
+            // Start only at a station, not when merely walking towards one. At the very start a coarse fix
+            // may be all there is; after walking out, re-entering takes an accurate fix at a station —
+            // on the first real ride a 47 m fix from the street 260 m away would otherwise have counted.
+            val zone = when {
+                !outside -> max(config.stationZoneMeters, minOf(2 * accuracyMeters, 600.0))
+                accuracyMeters <= config.reentryAccuracyMeters -> config.stationZoneMeters
+                else -> return
+            }
+            hypotheses = normalize(seedFromFix(lat, lon, sigma, zone).map(::applyDestination))
+            if (hypotheses.isNotEmpty()) outside = false
             return
         }
+        val fresh = seedFromFix(lat, lon, sigma).map(::applyDestination)
         val updated = hypotheses.flatMap { fixBranches(it, lat, lon, sigma) }
         val reseed = fresh.map { it.copy(weight = it.weight * config.reseedMass) }
         hypotheses = normalize(merge(updated + reseed))
+    }
+
+    /**
+     * Slow, accurate fixes away from every station for a while: the rider walked out. Tracking stops,
+     * so that street noise in the motion sensors cannot be mistaken for the next station.
+     */
+    private fun detectLeaving(obs: FixObs, accuracyMeters: Double): Boolean {
+        val nearest = network.lines.minOf { line -> line.stations.indices.minOf { distToStation(line.id, it, obs.lat, obs.lon) } }
+        if (nearest <= config.stationZoneMeters + 2 * accuracyMeters) {
+            farSince = null
+            return false
+        }
+        if (outside) return true
+        val start = farSince ?: obs.also { farSince = it }
+        val dt = if (obs.t != null && start.t != null) obs.t - start.t else return false
+        if (dt < config.leaveAfterSeconds) return false
+        if (distanceMeters(start.lat, start.lon, obs.lat, obs.lon) / dt > config.walkingSpeedMps) {
+            farSince = obs // moving fast: on a train with signal in the tunnel; restart the clock
+            return false
+        }
+        hypotheses = emptyList()
+        processedFix = null
+        outside = true
+        return true
     }
 
     private fun fixBranches(h: Hypothesis, lat: Double, lon: Double, sigma: Double): List<Hypothesis> {
@@ -183,11 +266,20 @@ class Tracker(
             is Position.Between -> {
                 val a = network.stationAt(h.lineId, p.from)
                 val b = network.stationAt(h.lineId, p.to)
+                val dStart = distanceMeters(a.lat, a.lon, lat, lon)
                 val dEnd = distanceMeters(b.lat, b.lon, lat, lon)
                 val atEnd = gauss(dEnd, sigma)
                 val onSegment = gauss(distanceToSegmentMeters(lat, lon, a.lat, a.lon, b.lat, b.lon), sigma)
+                // Around the origin station a fix must not favour one direction: which side of the station
+                // node the entrance or the Wi-Fi sits on says nothing about where the train is heading.
+                val nearStart = gauss(dStart, 2 * sigma)
+                // Deeper in the tunnel a fix is spread along the whole segment rather than concentrated at one
+                // point, and tunnels often have no signal at all: "in this tunnel" explains a fix worse than
+                // "at the station it points to" — e.g. when another line's station lies next to the tunnel.
+                val tunnel = minOf(1.0, 2.5 * sigma / distanceMeters(a.lat, a.lon, b.lat, b.lon)) * config.tunnelFixPrior
+                val along = nearStart * gauss(dStart, sigma) + (1 - nearStart) * onSegment * tunnel
                 // "Still in the tunnel" only if the fix is clearly short of the end station (2 sigma zone around it).
-                out += h.copy(weight = h.weight * (onSegment * (1 - gauss(dEnd, 2 * sigma)) + config.fixOutlier))
+                out += h.copy(weight = h.weight * (along * (1 - gauss(dEnd, 2 * sigma)) + config.fixOutlier))
                 if (atEnd > 1e-6) out += h.copy(position = Position.At(p.to), weight = h.weight * config.arriveOnFix * atEnd, movingSeconds = 0.0)
                 jumpsFrom(p.to, h.direction, config.arriveOnFix * config.missedMove)
             }
@@ -218,11 +310,18 @@ class Tracker(
     }
 
     /** Train stopped after [movedSeconds] of movement since the previous departure or tunnel stop. */
-    fun onStop(movedSeconds: Double) {
+    fun onStop(movedSeconds: Double, atSeconds: Double? = null) {
+        // A fix from the last few seconds knows where we are: an "arrived at X" guess from motion alone
+        // must agree with it. (Older fixes do not count — the provider replays stale positions in tunnels.)
+        val veto = recentFix?.takeIf { f -> atSeconds != null && f.t != null && atSeconds - f.t in 0.0..config.fixVetoSeconds }
         val next = hypotheses.flatMap { h ->
             when (val p = h.position) {
                 is Position.At -> listOf(h)
-                is Position.Between -> branchesOnStop(h, p, h.movingSeconds + movedSeconds)
+                is Position.Between -> branchesOnStop(h, p, h.movingSeconds + movedSeconds).map { branch ->
+                    val at = branch.position as? Position.At
+                    if (veto == null || at == null) branch
+                    else branch.copy(weight = branch.weight * (gauss(distToStation(h.lineId, at.index, veto.lat, veto.lon), veto.sigma) + config.fixOutlier))
+                }
             }
         }
         hypotheses = normalize(merge(next))
@@ -263,7 +362,7 @@ class Tracker(
             .groupBy { it.first to it.second }
             .map { (k, v) -> StationBelief(k.first, k.second, v.sumOf { it.third }) }
             .maxByOrNull { it.probability }
-        return Estimate(atStation, current, next, hypotheses.size)
+        return Estimate(atStation, current, next, hypotheses.size, outside)
     }
 
     // --- internals -------------------------------------------------------------------------
@@ -294,8 +393,8 @@ class Tracker(
         is Position.At -> (p.index + h.direction).takeIf { network.isValidIndex(h.lineId, it) }
     }
 
-    private fun seedFromFix(lat: Double, lon: Double, sigma: Double): List<Hypothesis> {
-        val gate = minOf(config.seedRadiusMeters, max(2.5 * sigma, 400.0))
+    private fun seedFromFix(lat: Double, lon: Double, sigma: Double, maxDistance: Double = Double.MAX_VALUE): List<Hypothesis> {
+        val gate = minOf(config.seedRadiusMeters, max(2.5 * sigma, 400.0), maxDistance)
         val out = mutableListOf<Hypothesis>()
         for (line in network.lines) {
             line.stations.forEachIndexed { i, _ ->

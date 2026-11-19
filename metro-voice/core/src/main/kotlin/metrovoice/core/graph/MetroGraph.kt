@@ -53,8 +53,11 @@ data class MetroGraph(
 /** Indexed, validated view over [MetroGraph] used by the tracker. */
 class MetroNetwork(
     val graph: MetroGraph,
-    /** Average moving speed (m/s) used when a segment has no measured time. */
-    private val avgSpeedMps: Double = 10.0,
+    /**
+     * Average speed (m/s) between departure and stop, used when a segment has no measured time.
+     * Calibrated on the first recorded Tbilisi ride: 1346 m in ~80 s and 904 m in ~51 s.
+     */
+    private val avgSpeedMps: Double = 17.0,
 ) {
     private val stationsById = graph.stations.associateBy { it.id }
     private val linesById = graph.lines.associateBy { it.id }

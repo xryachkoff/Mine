@@ -36,6 +36,7 @@ class SimulationTest {
             "pocket + late fix (20 s)",
             "transfer line 1 → 2",
             "transfer, in hand",
+            "left the metro, trip left running",
             "pocket, no fixes, destination set",
         )
         for (name in mustBeComplete) {
@@ -43,6 +44,44 @@ class SimulationTest {
             assertEquals(score.stations, score.announced, "missed stations in: $name ($score)")
             assertTrue(score.nextSaid >= score.stations - 2, "too few next-station phrases in: $name ($score)")
         }
+    }
+
+    @Test
+    fun standingAtAStationNeverRevealsDirection() {
+        // First real ride: 50 near-identical fixes at the entrance, then a departure, and the app
+        // claimed to know the direction before the train had gone anywhere.
+        val tr = Tracker(network)
+        val s = network.station("liberty-square")
+        var t = 0.0
+        fun fix(northMeters: Double, eastMeters: Double) {
+            tr.onFix(s.lat + northMeters / 111_320.0, s.lon + eastMeters / 83_000.0, 12.0, t)
+            t += 5.0
+        }
+        repeat(10) { fix(60.0 + it, 40.0) }
+        tr.onDeparture()
+        repeat(40) { fix(50.0 + it % 7, 45.0 - it % 5) }
+        val next = tr.estimate().next!!
+        assertTrue(next.probability < 0.7, "direction must still be open, got $next")
+    }
+
+    @Test
+    fun leavingTheMetroStopsTracking() {
+        val tr = Tracker(network)
+        val s = network.station("marjanishvili")
+        tr.onFix(s.lat, s.lon, 30.0, 0.0)
+        assertEquals("marjanishvili", tr.estimate().current?.stationId)
+        var t = 10.0
+        repeat(30) { // 280 m away, accurate GPS, for two and a half minutes
+            tr.onFix(s.lat + 280.0 / 111_320.0, s.lon + it * 1e-6, 16.0, t)
+            t += 5.0
+        }
+        assertTrue(tr.estimate().outside)
+        assertEquals(null, tr.estimate().current)
+        tr.onDeparture(); tr.onStop(68.0, t) // street noise: nothing to move
+        assertEquals(null, tr.estimate().current)
+        tr.onFix(s.lat, s.lon, 30.0, t + 600) // back at the station: tracking resumes
+        assertEquals("marjanishvili", tr.estimate().current?.stationId)
+        assertTrue(!tr.estimate().outside)
     }
 
     @Test

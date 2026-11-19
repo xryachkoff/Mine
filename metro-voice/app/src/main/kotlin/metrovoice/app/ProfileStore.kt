@@ -11,6 +11,8 @@ data class Profile(
     val muted: Boolean = false,
     /** Languages spoken, in order. Never empty. */
     val languages: List<String> = ALL_LANGUAGES,
+    /** Start a trip by itself when the phone comes near a station (needs background location). */
+    val autoStart: Boolean = false,
 ) {
     companion object {
         val ALL_LANGUAGES = listOf("ru", "en")
@@ -25,6 +27,7 @@ object ProfileStore {
     private const val KEY_GUEST = "guest"
     private const val KEY_MUTED = "muted"
     private const val KEY_LANGUAGES = "languages"
+    private const val KEY_AUTO_START = "autoStart"
 
     private val _profile = MutableStateFlow(Profile())
     val profile: StateFlow<Profile> = _profile
@@ -39,6 +42,7 @@ object ProfileStore {
             workStationId = p.getString(KEY_WORK, null),
             muted = p.getBoolean(KEY_MUTED, false),
             languages = languages?.takeIf { it.isNotEmpty() } ?: Profile.ALL_LANGUAGES,
+            autoStart = p.getBoolean(KEY_AUTO_START, false),
         )
     }
 
@@ -55,6 +59,11 @@ object ProfileStore {
     fun setMuted(context: Context, muted: Boolean) {
         prefs(context).edit().putBoolean(KEY_MUTED, muted).apply()
         _profile.value = _profile.value.copy(muted = muted)
+    }
+
+    fun setAutoStart(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_AUTO_START, enabled).apply()
+        _profile.value = _profile.value.copy(autoStart = enabled)
     }
 
     /** Turns one language on or off; the last remaining language cannot be turned off. */

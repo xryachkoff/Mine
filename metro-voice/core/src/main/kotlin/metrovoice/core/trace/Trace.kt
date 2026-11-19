@@ -49,6 +49,10 @@ sealed interface TraceRecord {
     @Serializable @SerialName("label")
     data class Label(override val t: Double, val stationId: String) : TraceRecord
 
+    /** The rider chose where they are going (null = cleared). Replayed, unlike labels: it is input, not truth. */
+    @Serializable @SerialName("dest")
+    data class Dest(override val t: Double, val stationId: String? = null) : TraceRecord
+
     @Serializable @SerialName("phase")
     data class Phase(override val t: Double, val phase: String, val variance: Double) : TraceRecord
 
@@ -97,7 +101,8 @@ object TraceReplayer {
             now = r.t
             when (r) {
                 is TraceRecord.Acc -> engine.onAccelerometer(r.t, r.x, r.y, r.z)
-                is TraceRecord.Loc -> engine.onLocation(r.lat, r.lon, r.acc)
+                is TraceRecord.Loc -> engine.onLocation(r.t, r.lat, r.lon, r.acc)
+                is TraceRecord.Dest -> engine.setDestination(r.stationId)
                 is TraceRecord.Label -> labels += r // ground truth is not fed to the engine
                 else -> Unit
             }

@@ -91,12 +91,12 @@ class TraceTest {
         }
         fun fix(id: String) {
             val s = Fixtures.station(id)
-            engine.onLocation(s.lat, s.lon, 150.0)
+            engine.onLocation(t, s.lat, s.lon, 150.0)
             lines += TraceCodec.encode(TraceRecord.Loc(t, s.lat, s.lon, 150.0))
             lines += TraceCodec.encode(TraceRecord.Label(t, id))
         }
-        period(15.0, 0.02); fix("A1"); period(10.0, 0.02)
-        period(90.0, 0.3); period(20.0, 0.02); fix("A2"); period(10.0, 0.02)
+        period(15.0, 0.06); fix("A1"); period(10.0, 0.06)
+        period(90.0, 0.8); period(20.0, 0.06); fix("A2"); period(10.0, 0.06)
 
         val result = TraceReplayer.replay(lines.asSequence(), Fixtures.network, listOf("en"))
         assertEquals(live.map { it.text }, result.spoken.map { it.announcement.text })

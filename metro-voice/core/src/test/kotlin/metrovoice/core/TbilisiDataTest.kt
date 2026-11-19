@@ -39,7 +39,7 @@ class TbilisiDataTest {
             override fun onAnnouncements(announcements: List<Announcement>) { said += announcements }
         })
         val sim = ManualRide(engine, seed = 7)
-        fun fix(id: String) = network.station(id).let { engine.onLocation(it.lat, it.lon, 300.0) }
+        fun fix(id: String) = network.station(id).let { engine.onLocation(sim.t, it.lat, it.lon, 300.0) }
 
         sim.stand(15.0); fix("rustaveli"); sim.stand(15.0)
         sim.ride(network.expectedSeconds("1", 6, 5)); sim.stand(20.0); fix("liberty-square"); sim.stand(10.0)

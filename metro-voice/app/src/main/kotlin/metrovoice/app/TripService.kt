@@ -65,9 +65,23 @@ class TripService : LifecycleService() {
         private const val WIFI_PERIOD_MS = 30_000L
         private const val MAX_FIX_AGE_NS = 20_000_000_000L
 
-        fun start(context: Context) = ContextCompat.startForegroundService(
-            context, Intent(context, TripService::class.java).setAction(ACTION_START),
-        )
+        const val EXTRA_AUTO = "auto"
+        const val EXTRA_STATION = "station"
+        private const val FINISHED_NOTIFICATION_ID = 2
+        private const val WATCHDOG_PERIOD_MS = 30_000L
+        /** Out of the metro for this long: the trip ends by itself. Long enough to change entrances on foot. */
+        private const val LEAVE_GRACE_MS = 2 * 60_000L
+        /** No new station for this long: a forgotten trip. Shorter when the trip started by itself. */
+        private const val IDLE_LIMIT_AUTO_MS = 15 * 60_000L
+        private const val IDLE_LIMIT_MANUAL_MS = 60 * 60_000L
+
+        fun startIntent(context: Context, auto: Boolean = false, stationId: String? = null): Intent =
+            Intent(context, TripService::class.java).setAction(ACTION_START)
+                .putExtra(EXTRA_AUTO, auto).putExtra(EXTRA_STATION, stationId)
+
+        /** [auto] = started by a station geofence rather than by the rider. */
+        fun start(context: Context, auto: Boolean = false, stationId: String? = null) =
+            ContextCompat.startForegroundService(context, startIntent(context, auto, stationId))
 
         fun stop(context: Context) = context.startService(Intent(context, TripService::class.java).setAction(ACTION_STOP))
     }
@@ -83,6 +97,11 @@ class TripService : LifecycleService() {
     private var lastText = "Ищу станцию…"
     private var tripFile: File? = null
     private val visited = ArrayList<String>()
+    private var autoStarted = false
+    /** Entry station of a self-started trip: not spoken until another station is reached. */
+    private var silentAtStation: String? = null
+    @Volatile private var outsideSinceMs: Long? = null
+    @Volatile private var lastProgressMs = 0L
 
     private val sensors by lazy { getSystemService(SensorManager::class.java) }
     private val fused by lazy { LocationServices.getFusedLocationProviderClient(this) }
@@ -105,20 +124,35 @@ class TripService : LifecycleService() {
                 if (!::handler.isInitialized) stopSelf() // no trip running: nothing to keep alive
                 return START_NOT_STICKY
             }
-            else -> if (engine == null) startTrip()
+            else -> if (!::handler.isInitialized) {
+                startTrip(intent?.getBooleanExtra(EXTRA_AUTO, false) == true, intent?.getStringExtra(EXTRA_STATION))
+            }
         }
         return START_NOT_STICKY
     }
 
-    private fun startTrip() {
+    private fun startTrip(auto: Boolean, entryStation: String?) {
         createChannel()
         ProfileStore.init(this)
-        ServiceCompat.startForeground(
-            this, NOTIFICATION_ID, notification(),
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0,
-        )
-        val net = CityRepository.load(this) ?: run { stopSelf(); return }
+        val net = CityRepository.load(this)
+        if (auto && entryStation != null && net != null) {
+            lastTitle = "Поездка начата: ${net.station(entryStation).name.let { it["ru"] ?: it["en"] ?: entryStation }}"
+            lastText = "Запустилась сама у станции. Остановится, когда выйдете из метро."
+        }
+        val started = runCatching {
+            ServiceCompat.startForeground(
+                this, NOTIFICATION_ID, notification(),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0,
+            )
+        }.isSuccess
+        // Location permission revoked, or the system refused a background start: nothing to run.
+        if (!started || net == null) { stopSelf(); return }
         network = net
+        autoStarted = auto
+        // A trip that started by itself stays silent until the rider really travels: walking past a
+        // station must not put "Station X" into the headphones.
+        silentAtStation = entryStation.takeIf { auto }
+        lastProgressMs = SystemClock.elapsedRealtime()
 
         thread = HandlerThread("trip").apply { start() }
         handler = Handler(thread.looper)
@@ -131,9 +165,12 @@ class TripService : LifecycleService() {
         speaker = Speaker(this) { lang -> TripBus.update { it.copy(missingVoices = it.missingVoices + lang) } }
 
         handler.post {
-            trace?.write(TraceRecord.Meta(0.0, net.graph.city, "${Build.MANUFACTURER} ${Build.MODEL} API ${Build.VERSION.SDK_INT}", "0.4.0"))
+            trace?.write(TraceRecord.Meta(0.0, net.graph.city, "${Build.MANUFACTURER} ${Build.MODEL} API ${Build.VERSION.SDK_INT}", "0.5.0"))
             engine = TripEngine(net, listOf("ru", "en"), listener = EngineListener()).also { e ->
-                TripBus.state.value.destination?.let(e::setDestination)
+                TripBus.state.value.destination?.let {
+                    trace?.write(TraceRecord.Dest(0.0, it))
+                    e.setDestination(it)
+                }
             }
         }
 
@@ -141,6 +178,7 @@ class TripService : LifecycleService() {
         requestLocation()
         handler.postDelayed(cellTick, 1_000)
         registerWifi()
+        handler.postDelayed(watchdog, WATCHDOG_PERIOD_MS)
 
         lifecycleScope.launch {
             TripBus.commands.collect { cmd ->
@@ -151,7 +189,10 @@ class TripService : LifecycleService() {
                             engine?.setStation(cmd.stationId)
                             visit(cmd.stationId)
                         }
-                        is Command.Destination -> engine?.setDestination(cmd.stationId)
+                        is Command.Destination -> {
+                            trace?.write(TraceRecord.Dest(now(), cmd.stationId))
+                            engine?.setDestination(cmd.stationId)
+                        }
                     }
                 }
             }
@@ -184,13 +225,19 @@ class TripService : LifecycleService() {
         override fun onAnnouncements(announcements: List<Announcement>) {
             val t = now()
             announcements.forEach { trace?.write(TraceRecord.Say(t, it.key, it.text)) }
+            val station = announcements.firstOrNull { it.kind == AnnouncementKind.STATION }?.stationId
+            if (station != null && station != silentAtStation) silentAtStation = null
             val settings = ProfileStore.profile.value
-            if (!settings.muted) speaker?.speak(announcements.filter { it.language in settings.languages })
-            announcements.firstOrNull { it.kind == AnnouncementKind.STATION }?.stationId?.let(::visit)
+            if (!settings.muted && silentAtStation == null) {
+                speaker?.speak(announcements.filter { it.language in settings.languages })
+            }
+            station?.let(::visit)
             TripBus.update { it.copy(lastSaid = announcements.joinToString(" ") { a -> a.text }) }
         }
 
         override fun onEstimate(estimate: Estimate, phase: Phase) {
+            if (!estimate.outside) outsideSinceMs = null
+            else if (outsideSinceMs == null) outsideSinceMs = SystemClock.elapsedRealtime()
             TripBus.update { it.copy(estimate = estimate, phase = phase.name) }
             updateNotification(estimate)
         }
@@ -204,6 +251,7 @@ class TripService : LifecycleService() {
     private fun visit(stationId: String) {
         if (visited.lastOrNull() == stationId) return
         visited += stationId
+        lastProgressMs = SystemClock.elapsedRealtime()
         tripFile?.let { f -> runCatching { TripHistory.stationsFile(f).writeText(visited.joinToString("\n")) } }
     }
 
@@ -215,6 +263,7 @@ class TripService : LifecycleService() {
         val (title, text) = when {
             current != null -> name(current.stationId) to (next?.let { "Следующая: ${name(it.stationId)}" } ?: "Направление уточняется")
             next != null -> "→ ${name(next.stationId)}" to "В пути"
+            e.outside -> "Вы вышли из метро" to "Поездка скоро завершится сама"
             e.current == null && e.next == null -> "Ищу станцию" to "Жду сигнал сети"
             else -> "Между станциями" to "Направление уточняется"
         }
@@ -222,6 +271,46 @@ class TripService : LifecycleService() {
         lastTitle = title
         lastText = text
         refreshNotification()
+    }
+
+    /** Ends trips nobody is going to end: the rider walked out of the metro, or simply forgot. */
+    private val watchdog = object : Runnable {
+        override fun run() {
+            val now = SystemClock.elapsedRealtime()
+            val outside = outsideSinceMs
+            val idleLimit = if (autoStarted) IDLE_LIMIT_AUTO_MS else IDLE_LIMIT_MANUAL_MS
+            when {
+                outside != null && now - outside >= LEAVE_GRACE_MS -> finish("Вы вышли из метро.")
+                now - lastProgressMs >= idleLimit -> finish("Давно нет новых станций.")
+                else -> handler.postDelayed(this, WATCHDOG_PERIOD_MS)
+            }
+        }
+    }
+
+    private fun finish(reason: String) {
+        val route = visited.takeIf { it.size >= 2 }?.let { v ->
+            val net = network
+            fun name(id: String) = net?.station(id)?.name?.let { it["ru"] ?: it["en"] } ?: id
+            " ${name(v.first())} → ${name(v.last())}."
+        }.orEmpty()
+        // A self-started trip that went nowhere (walked past a station) ends without a word.
+        if (!(autoStarted && visited.size < 2)) {
+            val n = NotificationCompat.Builder(this, CHANNEL)
+                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                .setContentTitle("Поездка завершена")
+                .setContentText("$reason$route Запись сохранена в истории.")
+                .setStyle(NotificationCompat.BigTextStyle().bigText("$reason$route Запись сохранена в истории."))
+                .setAutoCancel(true)
+                .setContentIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
+                .build()
+            getSystemService(NotificationManager::class.java).notify(FINISHED_NOTIFICATION_ID, n)
+        } else {
+            // Nothing happened on it: do not litter the history either.
+            trace?.close()
+            trace = null
+            tripFile?.let { TripHistory.delete(it.absolutePath) }
+        }
+        stopSelf()
     }
 
     private fun refreshNotification() {
@@ -271,7 +360,7 @@ class TripService : LifecycleService() {
                 val t = tOf(loc.elapsedRealtimeNanos)
                 trace?.write(TraceRecord.Loc(t, loc.latitude, loc.longitude, loc.accuracy.toDouble(), loc.provider))
                 TripBus.update { it.copy(lastFixElapsedMs = loc.elapsedRealtimeNanos / 1_000_000, lastFixAccuracyMeters = loc.accuracy.toInt()) }
-                engine?.onLocation(loc.latitude, loc.longitude, loc.accuracy.toDouble())
+                engine?.onLocation(t, loc.latitude, loc.longitude, loc.accuracy.toDouble())
             }
         }
     }

@@ -20,10 +20,12 @@ class MotionDetector(private val config: Config = Config()) {
     data class Config(
         val windowSeconds: Double = 2.0,
         val gravityAlpha: Double = 0.9,
+        // First recorded ride (phone in a pocket): riding 0.025–0.3, train standing 0.0007,
+        // standing at a platform with people moving 0.008–0.02. One ride — revisit with more data.
         /** Variance (m²/s⁴) above which the train is considered moving. */
-        val moveVariance: Double = 0.01,
+        val moveVariance: Double = 0.02,
         /** Variance below which the train is considered stopped. */
-        val stopVariance: Double = 0.004,
+        val stopVariance: Double = 0.006,
         /** Variance above which the user is considered walking. */
         val walkVariance: Double = 1.0,
         val minMoveSeconds: Double = 4.0,

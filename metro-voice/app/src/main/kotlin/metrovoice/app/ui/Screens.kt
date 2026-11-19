@@ -307,7 +307,8 @@ private fun NowCard(network: MetroNetwork, state: UiState, muted: Boolean, nowEl
     val e = state.estimate
     val atStation = e?.current?.takeIf { e.atStationProbability > 0.5 }
     val nextKnown = e?.next?.takeIf { it.probability >= 0.85 }
-    val searching = e?.current == null && e?.next == null
+    val outside = e?.outside == true
+    val searching = !outside && e?.current == null && e?.next == null
     // A station is a calm, "primary" state; in the tunnel and while searching the card steps back.
     val (container, content) = if (atStation != null) {
         MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.onPrimaryContainer
@@ -319,6 +320,7 @@ private fun NowCard(network: MetroNetwork, state: UiState, muted: Boolean, nowEl
             Column(Modifier.weight(1f).padding(top = 4.dp)) {
                 Text(
                     (if (state.demo) "ДЕМО · " else "") + when {
+                        outside -> "ВНЕ МЕТРО"
                         searching -> "ИЩУ СТАНЦИЮ"
                         atStation != null -> "СТАНЦИЯ"
                         else -> "В ПУТИ"
@@ -328,6 +330,7 @@ private fun NowCard(network: MetroNetwork, state: UiState, muted: Boolean, nowEl
                 Text(
                     when {
                         atStation != null -> network.ruName(atStation.stationId)
+                        outside -> "Вы вышли из метро"
                         nextKnown != null -> "→ ${network.ruName(nextKnown.stationId)}"
                         searching -> "Жду сигнал сети"
                         else -> "Между станциями"
@@ -340,7 +343,9 @@ private fun NowCard(network: MetroNetwork, state: UiState, muted: Boolean, nowEl
                         fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     )
                 }
-                if (!state.demo) {
+                if (outside) {
+                    Text("Поездка завершится сама через пару минут.", fontSize = 16.sp)
+                } else if (!state.demo) {
                     val freshness = freshness(state, nowElapsedMs)
                     Spacer(Modifier.height(4.dp))
                     Text(
@@ -599,6 +604,7 @@ fun ProfileScreen(
     onToggleMute: () -> Unit,
     onToggleLanguage: (String) -> Unit,
     onTestVoice: () -> Unit,
+    onToggleAutoStart: () -> Unit,
     onDemo: () -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -651,6 +657,16 @@ fun ProfileScreen(
         SwitchRow("English", "en" in profile.languages, enabled = profile.languages != listOf("en")) { onToggleLanguage("en") }
         Spacer(Modifier.height(4.dp))
         OutlinedButton(onClick = onTestVoice, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Проверить голос") }
+
+        Spacer(Modifier.height(24.dp))
+        SectionTitle("Автоматика")
+        SwitchRow("Начинать поездку у станции", profile.autoStart) { onToggleAutoStart() }
+        Text(
+            "Поездка запускается сама, когда вы подходите к станции метро, и молчит, пока вы не поедете. " +
+                "Нужен доступ к геолокации «Разрешать всегда». Завершается поездка сама в любом случае: " +
+                "через пару минут после выхода из метро.",
+            fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
         Spacer(Modifier.height(24.dp))
         SectionTitle("Проверка")

@@ -61,9 +61,9 @@ class MotionDetectorTest {
                 t += 0.02
             }
         }
-        feed(20.0, 0.02)
-        feed(60.0, 0.3)
-        feed(30.0, 0.02)
+        feed(20.0, 0.06)
+        feed(60.0, 0.8)
+        feed(30.0, 0.06)
 
         assertEquals(listOf(Phase.STOPPED, Phase.MOVING, Phase.STOPPED), changes.map { it.phase })
         assertTrue(changes[1].atSeconds in 19.0..23.0, "departure at ${changes[1].atSeconds}")

@@ -37,7 +37,7 @@ class ScreenshotTest {
     @get:Rule val compose = createComposeRule()
 
     private val network = MetroNetwork(MetroGraph.parse(File("src/main/assets/cities/tbilisi.json").readText()))
-    private val profile = Profile(homeStationId = "didube", workStationId = "rustaveli")
+    private val profile = Profile(homeStationId = "didube", workStationId = "rustaveli", autoStart = true)
 
     private fun shot(name: String, dark: Boolean = false, wholeScreen: Boolean = false, content: @Composable () -> Unit) {
         compose.setContent { MetroTheme(dark = dark) { Surface { content() } } }
@@ -84,7 +84,7 @@ class ScreenshotTest {
     @Test fun profileScreen() = shot("5-profile") {
         ProfileScreen(
             network, Account("u1", "Ника Б.", "nika@example.com", "google.com"), profile, signInAvailable = true,
-            onBack = {}, onSetHome = {}, onSetWork = {}, onToggleMute = {}, onToggleLanguage = {}, onTestVoice = {}, onDemo = {}, onSignOut = {},
+            onBack = {}, onSetHome = {}, onSetWork = {}, onToggleMute = {}, onToggleLanguage = {}, onTestVoice = {}, onToggleAutoStart = {}, onDemo = {}, onSignOut = {},
         )
     }
 
@@ -109,6 +109,10 @@ class ScreenshotTest {
 
     @Test fun staleFix() = shot("10-no-fix-warning") {
         Trip(inTunnel.copy(lastFixElapsedMs = now - 320_000, destination = "technical-university"), profile.copy(muted = true))
+    }
+
+    @Test fun leftTheMetro() = shot("13-left-the-metro") {
+        Trip(riding.copy(estimate = Estimate(0.0, null, null, 0, outside = true)))
     }
 
     /** Accessibility check: system font at 150%. */

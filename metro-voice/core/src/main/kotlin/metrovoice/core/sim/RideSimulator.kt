@@ -35,6 +35,12 @@ data class SimOptions(
     val tunnelStopSegment: Int? = null,
     /** Destination given by the user ("home"/"work" button). */
     val destination: String? = null,
+    /**
+     * After the last station the rider walks 280 m away and leaves the trip running, with street
+     * noise that looks like "moved for a minute, then stopped". Taken from the first real ride,
+     * where this produced an announcement of a station the rider never reached.
+     */
+    val leavesAndForgetsToStop: Boolean = false,
 )
 
 /** Ground truth: the train stood at [stationId] from [arrive] to [depart]; [nextStationId] comes after it. */
@@ -55,6 +61,9 @@ class SimulatedRide(val records: List<TraceRecord>, val truth: List<TruthStop>, 
 
 object RideSimulator {
     private const val HZ = 50
+    const val STAND_SD = 0.06
+    const val RIDE_SD = 0.8
+    const val WALK_SD = 5.0
 
     fun generate(network: MetroNetwork, legs: List<Leg>, options: SimOptions = SimOptions()): SimulatedRide {
         val rnd = Random(options.seed)
@@ -72,8 +81,10 @@ object RideSimulator {
                 t += 1.0 / HZ
             }
         }
-        val standSd = if (options.handheld) 0.15 else 0.02
-        val rideSd = if (options.handheld) 0.4 else 0.3
+        // Noise levels matched to the first recorded ride (variance of linear acceleration as the detector
+        // sees it): train standing ≈ 0.0007, riding ≈ 0.1, walking ≈ 4. In the hand, tremor hides the stops.
+        val standSd = if (options.handheld) 0.45 else STAND_SD
+        val rideSd = if (options.handheld) 0.9 else RIDE_SD
         fun fix(stationId: String) {
             val s = network.station(stationId)
             fun gaussian() = (1..6).sumOf { rnd.nextDouble(-1.0, 1.0) } / 1.414 // ≈ N(0,1)
@@ -101,7 +112,7 @@ object RideSimulator {
             val to = stations.indexOf(leg.to)
             require(from >= 0 && to >= 0 && from != to) { "Bad leg $leg" }
             val step = if (to > from) 1 else -1
-            if (legIndex > 0) acc(120.0, 2.5) // walking transfer
+            if (legIndex > 0) acc(120.0, WALK_SD) // walking transfer
 
             var i = from
             // The first station of every leg has a fix: the user is at the platform with signal.
@@ -121,6 +132,19 @@ object RideSimulator {
                 // At the end of a leg the engine cannot know the rider gets off: the next station along the line is still right.
                 val next = stations.getOrNull(i + step)
                 dwell(stations[i], leg.lineId, next, withFix = rnd.nextDouble() < options.fixProbability)
+            }
+        }
+        if (options.leavesAndForgetsToStop) {
+            val exit = network.station(truth.last().stationId)
+            fun gps(metersNorth: Double) {
+                records += TraceRecord.Loc(r4(t), exit.lat + metersNorth / 111_320.0, exit.lon + rnd.nextDouble(-2e-5, 2e-5), 16.0, "sim-gps")
+            }
+            repeat(20) { i -> acc(6.0, WALK_SD); gps(280.0 * (i + 1) / 20) } // two minutes on foot
+            repeat(4) {
+                repeat(3) { acc(20.0, STAND_SD); gps(280.0) }
+                acc(68.0, RIDE_SD) // a tram passing, the phone being carried: "train-like" vibration
+                gps(280.0)
+                acc(15.0, STAND_SD)
             }
         }
         return SimulatedRide(records, truth, options)
@@ -200,6 +224,7 @@ object Scenarios {
             Scenario("pocket + late fix (20 s)", line1, SimOptions(fixDelaySeconds = 20.0), "slow network"),
             Scenario("transfer line 1 → 2", transfer, SimOptions(), "walking transfer at Station Square"),
             Scenario("transfer, in hand", transfer, SimOptions(handheld = true), "transfer without motion detection"),
+            Scenario("left the metro, trip left running", listOf(Leg("1", "liberty-square", "marjanishvili")), SimOptions(leavesAndForgetsToStop = true), "street noise must not become a station"),
             Scenario("pocket, no fixes, destination set", line1, SimOptions(fixProbability = 0.0, destination = "nadzaledevi"), "dead reckoning on estimated times"),
             Scenario("pocket, no fixes, trains 25% faster", line1, SimOptions(fixProbability = 0.0, destination = "nadzaledevi", speedFactor = 0.75), "estimated times are wrong"),
             Scenario("in hand, no fixes", line1, SimOptions(handheld = true, fixProbability = 0.0, destination = "nadzaledevi"), "nothing to go on: must stay silent"),

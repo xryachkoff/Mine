@@ -64,12 +64,12 @@ class ManualRide(private val engine: TripEngine, seed: Int = 42) {
         }
     }
 
-    fun stand(seconds: Double) = run(seconds, 0.02)
-    fun ride(seconds: Double) = run(seconds, 0.3)
-    fun walk(seconds: Double) = run(seconds, 2.5)
+    fun stand(seconds: Double) = run(seconds, metrovoice.core.sim.RideSimulator.STAND_SD)
+    fun ride(seconds: Double) = run(seconds, metrovoice.core.sim.RideSimulator.RIDE_SD)
+    fun walk(seconds: Double) = run(seconds, metrovoice.core.sim.RideSimulator.WALK_SD)
 
     fun fixAt(stationId: String, accuracy: Double = 200.0, offsetMeters: Double = 0.0) {
         val s = Fixtures.station(stationId)
-        engine.onLocation(s.lat + offsetMeters / 111_000.0, s.lon, accuracy)
+        engine.onLocation(t, s.lat + offsetMeters / 111_000.0, s.lon, accuracy)
     }
 }

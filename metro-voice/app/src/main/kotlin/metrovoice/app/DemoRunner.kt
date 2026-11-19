@@ -50,7 +50,7 @@ object DemoRunner {
                     }
                     when (r) {
                         is TraceRecord.Acc -> engine.onAccelerometer(r.t, r.x, r.y, r.z)
-                        is TraceRecord.Loc -> engine.onLocation(r.lat, r.lon, r.acc)
+                        is TraceRecord.Loc -> engine.onLocation(r.t, r.lat, r.lon, r.acc)
                         else -> Unit
                     }
                 }
