@@ -20,6 +20,10 @@ data class UiState(
     val destination: String? = null,
     /** Simulated ride (no sensors, nothing recorded). */
     val demo: Boolean = false,
+    /** SystemClock.elapsedRealtime() when the trip started and when the last location fix arrived. */
+    val startedElapsedMs: Long? = null,
+    val lastFixElapsedMs: Long? = null,
+    val lastFixAccuracyMeters: Int? = null,
 )
 
 sealed interface Command {
@@ -61,21 +65,52 @@ data class TripInfo(val path: String, val title: String, val subtitle: String, v
 
 object TripHistory {
     private val nameFormat = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
-    private val titleFormat = java.text.SimpleDateFormat("d MMMM, HH:mm", java.util.Locale("ru"))
+    private val dateFormat = java.text.SimpleDateFormat("d MMMM, HH:mm", java.util.Locale("ru"))
 
-    fun list(context: Context, recordingPath: String?): List<TripInfo> =
+    private fun isTrip(f: File) = f.name.startsWith("trip-") && (f.name.endsWith(".jsonl") || f.name.endsWith(".jsonl.gz"))
+
+    /** Sidecar with the stations passed, written during the ride: `trip-….stations`, one id per line. */
+    fun stationsFile(tripFile: File): File = File(tripFile.parentFile, tripFile.name.substringBefore('.') + ".stations")
+
+    fun list(context: Context, network: MetroNetwork?, recordingPath: String?): List<TripInfo> =
         CityRepository.tripsDir(context).listFiles().orEmpty()
-            .filter { it.name.startsWith("trip-") }
+            .filter(::isTrip)
             .sortedByDescending { it.name }
             .map { f ->
                 val start = runCatching { nameFormat.parse(f.name.removePrefix("trip-").substringBefore('.')) }.getOrNull()
+                val date = start?.let(dateFormat::format) ?: f.name
                 val minutes = start?.let { ((f.lastModified() - it.time) / 60_000).coerceAtLeast(0) }
                 val size = if (f.length() >= 1_000_000) "%.1f МБ".format(f.length() / 1e6) else "${f.length() / 1000} КБ"
+                val stations = runCatching { stationsFile(f).readLines().filter { it.isNotBlank() } }.getOrDefault(emptyList())
+                fun name(id: String) = runCatching { network?.station(id)?.name?.let { it["ru"] ?: it["en"] } }.getOrNull() ?: id
+                val route = when {
+                    stations.size >= 2 -> "${name(stations.first())} → ${name(stations.last())}"
+                    stations.size == 1 -> name(stations.first())
+                    else -> null
+                }
                 TripInfo(
                     path = f.absolutePath,
-                    title = start?.let(titleFormat::format) ?: f.name,
-                    subtitle = listOfNotNull(minutes?.let { "$it мин" }, size).joinToString(" · "),
+                    title = route ?: date,
+                    subtitle = listOfNotNull(
+                        date.takeIf { route != null },
+                        minutes?.let { "$it мин" },
+                        stations.size.takeIf { it >= 2 }?.let { "$it ${pluralStations(it)}" },
+                        size,
+                    ).joinToString(" · "),
                     recording = f.absolutePath == recordingPath,
                 )
             }
+
+    fun delete(path: String) {
+        val f = File(path)
+        stationsFile(f).delete()
+        f.delete()
+    }
+
+    private fun pluralStations(n: Int): String = when {
+        n % 100 in 11..14 -> "станций"
+        n % 10 == 1 -> "станция"
+        n % 10 in 2..4 -> "станции"
+        else -> "станций"
+    }
 }

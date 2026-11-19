@@ -57,6 +57,8 @@ object AuthManager {
         _account.value = when {
             user != null -> user.toAccount()
             ProfileStore.isGuest(context) -> Account.Guest
+            // No sign-in backend in this build: a sign-in screen would be a dead end, go straight in.
+            !isConfigured(context) -> Account.Guest
             else -> null
         }
     }

@@ -36,6 +36,7 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import kotlinx.coroutines.launch
 import metrovoice.core.announce.Announcement
+import metrovoice.core.announce.AnnouncementKind
 import metrovoice.core.engine.TripEngine
 import metrovoice.core.graph.MetroNetwork
 import metrovoice.core.motion.Phase
@@ -57,6 +58,7 @@ class TripService : LifecycleService() {
     companion object {
         const val ACTION_START = "metrovoice.START"
         const val ACTION_STOP = "metrovoice.STOP"
+        const val ACTION_TOGGLE_MUTE = "metrovoice.TOGGLE_MUTE"
         private const val CHANNEL = "trip"
         private const val NOTIFICATION_ID = 1
         private const val CELL_PERIOD_MS = 10_000L
@@ -77,7 +79,10 @@ class TripService : LifecycleService() {
     private var trace: TraceWriter? = null
     private var speaker: Speaker? = null
     private var startNs = 0L
-    private var lastNotificationText = ""
+    private var lastTitle = "Поездка начата"
+    private var lastText = "Ищу станцию…"
+    private var tripFile: File? = null
+    private val visited = ArrayList<String>()
 
     private val sensors by lazy { getSystemService(SensorManager::class.java) }
     private val fused by lazy { LocationServices.getFusedLocationProviderClient(this) }
@@ -95,6 +100,11 @@ class TripService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
             ACTION_STOP -> { stopSelf(); return START_NOT_STICKY }
+            ACTION_TOGGLE_MUTE -> {
+                ProfileStore.setMuted(this, !ProfileStore.profile.value.muted)
+                if (!::handler.isInitialized) stopSelf() // no trip running: nothing to keep alive
+                return START_NOT_STICKY
+            }
             else -> if (engine == null) startTrip()
         }
         return START_NOT_STICKY
@@ -102,8 +112,9 @@ class TripService : LifecycleService() {
 
     private fun startTrip() {
         createChannel()
+        ProfileStore.init(this)
         ServiceCompat.startForeground(
-            this, NOTIFICATION_ID, notification("Поездка начата", "Жду станцию…"),
+            this, NOTIFICATION_ID, notification(),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION else 0,
         )
         val net = CityRepository.load(this) ?: run { stopSelf(); return }
@@ -115,11 +126,12 @@ class TripService : LifecycleService() {
 
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
         val file = File(CityRepository.tripsDir(this), "trip-$stamp.jsonl.gz")
+        tripFile = file
         trace = TraceWriter(file)
         speaker = Speaker(this) { lang -> TripBus.update { it.copy(missingVoices = it.missingVoices + lang) } }
 
         handler.post {
-            trace?.write(TraceRecord.Meta(0.0, net.graph.city, "${Build.MANUFACTURER} ${Build.MODEL} API ${Build.VERSION.SDK_INT}", "0.3.0"))
+            trace?.write(TraceRecord.Meta(0.0, net.graph.city, "${Build.MANUFACTURER} ${Build.MODEL} API ${Build.VERSION.SDK_INT}", "0.4.0"))
             engine = TripEngine(net, listOf("ru", "en"), listener = EngineListener()).also { e ->
                 TripBus.state.value.destination?.let(e::setDestination)
             }
@@ -137,13 +149,18 @@ class TripService : LifecycleService() {
                         is Command.AtStation -> {
                             trace?.write(TraceRecord.Label(now(), cmd.stationId))
                             engine?.setStation(cmd.stationId)
+                            visit(cmd.stationId)
                         }
                         is Command.Destination -> engine?.setDestination(cmd.stationId)
                     }
                 }
             }
         }
-        TripBus.update { UiState(running = true, tripFile = file.absolutePath, destination = it.destination) }
+        // Mute can be toggled from the notification or the screen: keep the notification action in sync.
+        lifecycleScope.launch { ProfileStore.profile.collect { refreshNotification() } }
+        TripBus.update {
+            UiState(running = true, tripFile = file.absolutePath, destination = it.destination, startedElapsedMs = SystemClock.elapsedRealtime())
+        }
     }
 
     override fun onDestroy() {
@@ -167,7 +184,9 @@ class TripService : LifecycleService() {
         override fun onAnnouncements(announcements: List<Announcement>) {
             val t = now()
             announcements.forEach { trace?.write(TraceRecord.Say(t, it.key, it.text)) }
-            speaker?.speak(announcements)
+            val settings = ProfileStore.profile.value
+            if (!settings.muted) speaker?.speak(announcements.filter { it.language in settings.languages })
+            announcements.firstOrNull { it.kind == AnnouncementKind.STATION }?.stationId?.let(::visit)
             TripBus.update { it.copy(lastSaid = announcements.joinToString(" ") { a -> a.text }) }
         }
 
@@ -181,15 +200,33 @@ class TripService : LifecycleService() {
         }
     }
 
+    /** Remembers the stations passed and keeps the sidecar file for the history list up to date. */
+    private fun visit(stationId: String) {
+        if (visited.lastOrNull() == stationId) return
+        visited += stationId
+        tripFile?.let { f -> runCatching { TripHistory.stationsFile(f).writeText(visited.joinToString("\n")) } }
+    }
+
     private fun updateNotification(e: Estimate) {
         val net = network ?: return
-        fun name(id: String?) = id?.let { net.station(it).name["ru"] ?: net.station(it).name["en"] } ?: "?"
-        val title = e.current?.takeIf { e.atStationProbability > 0.5 }
-            ?.let { "Станция ${name(it.stationId)} · ${(it.probability * 100).toInt()}%" } ?: "В пути"
-        val text = e.next?.let { "Следующая: ${name(it.stationId)} · ${(it.probability * 100).toInt()}%" } ?: "Направление неизвестно"
-        if (title + text == lastNotificationText) return
-        lastNotificationText = title + text
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(title, text))
+        fun name(id: String) = net.station(id).name.let { it["ru"] ?: it["en"] ?: id }
+        val current = e.current?.takeIf { e.atStationProbability > 0.5 }
+        val next = e.next?.takeIf { it.probability >= 0.85 }
+        val (title, text) = when {
+            current != null -> name(current.stationId) to (next?.let { "Следующая: ${name(it.stationId)}" } ?: "Направление уточняется")
+            next != null -> "→ ${name(next.stationId)}" to "В пути"
+            e.current == null && e.next == null -> "Ищу станцию" to "Жду сигнал сети"
+            else -> "Между станциями" to "Направление уточняется"
+        }
+        if (title == lastTitle && text == lastText) return
+        lastTitle = title
+        lastText = text
+        refreshNotification()
+    }
+
+    private fun refreshNotification() {
+        if (!::handler.isInitialized) return
+        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification())
     }
 
     // --- sensors ---------------------------------------------------------------------------
@@ -233,6 +270,7 @@ class TripService : LifecycleService() {
                 if (SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos > MAX_FIX_AGE_NS) continue
                 val t = tOf(loc.elapsedRealtimeNanos)
                 trace?.write(TraceRecord.Loc(t, loc.latitude, loc.longitude, loc.accuracy.toDouble(), loc.provider))
+                TripBus.update { it.copy(lastFixElapsedMs = loc.elapsedRealtimeNanos / 1_000_000, lastFixAccuracyMeters = loc.accuracy.toInt()) }
                 engine?.onLocation(loc.latitude, loc.longitude, loc.accuracy.toDouble())
             }
         }
@@ -309,18 +347,19 @@ class TripService : LifecycleService() {
         nm.createNotificationChannel(NotificationChannel(CHANNEL, "Поездка", NotificationManager.IMPORTANCE_LOW))
     }
 
-    private fun notification(title: String, text: String) = NotificationCompat.Builder(this, CHANNEL)
+    private fun serviceAction(action: String, requestCode: Int): PendingIntent =
+        PendingIntent.getService(this, requestCode, Intent(this, TripService::class.java).setAction(action), PendingIntent.FLAG_IMMUTABLE)
+
+    private fun notification() = NotificationCompat.Builder(this, CHANNEL)
         .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-        .setContentTitle(title)
-        .setContentText(text)
+        .setContentTitle(lastTitle)
+        .setContentText(lastText)
         .setOngoing(true)
         .setOnlyAlertOnce(true)
         .setContentIntent(
             PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE),
         )
-        .addAction(
-            0, "Стоп",
-            PendingIntent.getService(this, 1, Intent(this, TripService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE),
-        )
+        .addAction(0, if (ProfileStore.profile.value.muted) "Включить звук" else "Без звука", serviceAction(ACTION_TOGGLE_MUTE, 2))
+        .addAction(0, "Стоп", serviceAction(ACTION_STOP, 1))
         .build()
 }

@@ -8,6 +8,7 @@ import android.net.Uri
 import android.provider.Settings
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -23,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -33,12 +35,16 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.location.LocationManagerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import metrovoice.app.ui.HistoryScreen
 import metrovoice.app.ui.MetroTheme
 import metrovoice.app.ui.ProfileScreen
 import metrovoice.app.ui.TripScreen
 import metrovoice.app.ui.WelcomeScreen
+import metrovoice.core.announce.Announcement
+import metrovoice.core.announce.AnnouncementKind
+import metrovoice.core.announce.Phrases
 import metrovoice.core.graph.MetroNetwork
 import java.io.File
 
@@ -135,16 +141,20 @@ class MainActivity : ComponentActivity() {
                     network = network,
                     account = acc,
                     profile = profile,
+                    signInAvailable = AuthManager.isConfigured(this),
                     onBack = { screen = "trip" },
                     onSetHome = { ProfileStore.setHome(this, it) },
                     onSetWork = { ProfileStore.setWork(this, it) },
-                    onSignOut = {
-                        AuthManager.signOut(this)
-                        screen = "trip"
-                    },
+                    onToggleMute = { ProfileStore.setMuted(this, !profile.muted) },
+                    onToggleLanguage = { ProfileStore.toggleLanguage(this, it) },
+                    onTestVoice = { testVoice(network) },
                     onDemo = {
                         TripService.stop(this)
                         DemoRunner.start(this, network)
+                        screen = "trip"
+                    },
+                    onSignOut = {
+                        AuthManager.signOut(this)
                         screen = "trip"
                     },
                 )
@@ -153,30 +163,66 @@ class MainActivity : ComponentActivity() {
                 BackHandler { screen = "trip" }
                 var version by remember { mutableStateOf(0) }
                 val trips = remember(version, state.running) {
-                    TripHistory.list(this, state.tripFile.takeIf { state.running })
+                    TripHistory.list(this, network, state.tripFile.takeIf { state.running })
                 }
                 HistoryScreen(
                     trips = trips,
                     onBack = { screen = "trip" },
                     onShare = { shareTrip(File(it.path)) },
-                    onDelete = { File(it.path).delete(); version++ },
+                    onDelete = { TripHistory.delete(it.path); version++ },
                 )
             }
-            else -> TripScreen(
-                network = network,
-                state = state,
-                profile = profile,
-                onStart = { permissionLauncher.launch(requiredPermissions) },
-                onStop = { if (state.demo) DemoRunner.stop() else TripService.stop(this) },
-                onHistory = { screen = "history" },
-                onProfile = { screen = "profile" },
-                onAtStation = { TripBus.commands.tryEmit(Command.AtStation(it)) },
-                onDestination = { id ->
-                    TripBus.update { it.copy(destination = id) }
-                    TripBus.commands.tryEmit(Command.Destination(id))
-                },
-            )
+            else -> {
+                // Ticks once a second so the "last fix N s ago" line stays honest.
+                var now by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
+                val running = state.running
+                LaunchedEffect(running) {
+                    while (running) {
+                        now = SystemClock.elapsedRealtime()
+                        delay(1_000)
+                    }
+                }
+                TripScreen(
+                    network = network,
+                    state = state,
+                    profile = profile,
+                    nowElapsedMs = now,
+                    onStart = { permissionLauncher.launch(requiredPermissions) },
+                    onStop = { if (state.demo) DemoRunner.stop() else TripService.stop(this) },
+                    onHistory = { screen = "history" },
+                    onProfile = { screen = "profile" },
+                    onAtStation = { TripBus.commands.tryEmit(Command.AtStation(it)) },
+                    onDestination = { id ->
+                        TripBus.update { it.copy(destination = id) }
+                        TripBus.commands.tryEmit(Command.Destination(id))
+                    },
+                    onToggleMute = { ProfileStore.setMuted(this, !profile.muted) },
+                )
+            }
         }
+    }
+
+    private var voiceTester: Speaker? = null
+
+    /** Speaks a sample station in the enabled languages, so the voice can be checked at home. */
+    private fun testVoice(network: MetroNetwork) {
+        val speaker = voiceTester ?: Speaker(this) { lang ->
+            TripBus.update { it.copy(missingVoices = it.missingVoices + lang) }
+        }.also { voiceTester = it }
+        val station = network.lines.first().stations.first()
+        val names = network.station(station).name
+        speaker.speak(
+            ProfileStore.profile.value.languages.map { lang ->
+                val text = Phrases.get(lang, "station").replace("{station}", names[lang] ?: names["en"] ?: station)
+                Announcement(AnnouncementKind.STATION, station, lang, text)
+            },
+        )
+    }
+
+    override fun onDestroy() {
+        voiceTester?.shutdown()
+        voiceTester = null
+        super.onDestroy()
     }
 
     private fun shareTrip(latest: File) {

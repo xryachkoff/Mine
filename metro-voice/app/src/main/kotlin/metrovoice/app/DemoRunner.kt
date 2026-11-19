@@ -32,7 +32,10 @@ object DemoRunner {
             try {
                 val ride = RideSimulator.generate(network, demoRoute(network), SimOptions(seed = 7))
                 val engine = TripEngine(network, listOf("ru", "en"), listener = object : TripEngine.Listener {
-                    override fun onAnnouncements(announcements: List<Announcement>) = speaker.speak(announcements)
+                    override fun onAnnouncements(announcements: List<Announcement>) {
+                        val settings = ProfileStore.profile.value
+                        if (!settings.muted) speaker.speak(announcements.filter { it.language in settings.languages })
+                    }
                     override fun onEstimate(estimate: Estimate, phase: Phase) =
                         TripBus.update { it.copy(estimate = estimate, phase = phase.name) }
                 })

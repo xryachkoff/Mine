@@ -35,7 +35,7 @@
 
 | | | |
 |---|---|---|
-| ![](docs/screenshots/3-trip-riding.png) | ![](docs/screenshots/7-trip-in-tunnel.png) | ![](docs/screenshots/8-history.png) |
+| ![](docs/screenshots/3-trip-riding.png) | ![](docs/screenshots/7-trip-in-tunnel.png) | ![](docs/screenshots/9-confirm-station.png) |
 
 ## Стенд: симуляция поездок
 
