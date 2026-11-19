@@ -52,14 +52,20 @@ class ScreenshotTest {
     private val riding = UiState(
         running = true,
         phase = "STOPPED",
-        estimate = Estimate(0.96, StationBelief("rustaveli", "1", 0.94), StationBelief("marjanishvili", "1", 0.91), 4),
+        estimate = Estimate(
+            0.96, StationBelief("rustaveli", "1", 0.94), StationBelief("marjanishvili", "1", 0.91), 4,
+            towards = StationBelief("akhmeteli-theatre", "1", 0.95),
+        ),
         destination = "didube",
         startedElapsedMs = now - 400_000,
         lastFixElapsedMs = now - 12_000,
         lastFixAccuracyMeters = 40,
     )
     private val inTunnel = riding.copy(
-        estimate = Estimate(0.03, StationBelief("rustaveli", "1", 0.02), StationBelief("marjanishvili", "1", 0.95), 3),
+        estimate = Estimate(
+            0.03, StationBelief("rustaveli", "1", 0.02), StationBelief("marjanishvili", "1", 0.95), 3,
+            towards = StationBelief("akhmeteli-theatre", "1", 0.97),
+        ),
         lastFixElapsedMs = now - 55_000,
     )
 
@@ -103,6 +109,23 @@ class ScreenshotTest {
     @Test fun line() = shot("10-line") { LineScreen(network, UiState(), "1", {}, {}) }
 
     @Test fun lineCorrection() = shot("11-line-correct-position", dark = true) { LineScreen(network, riding, "1", {}, {}) }
+
+    /** Riding against the list order: the arrow on the full line points up. */
+    @Test fun lineReverseDirection() = shot("11b-line-reverse-direction") {
+        val e = Estimate(
+            0.96, StationBelief("rustaveli", "1", 0.94), StationBelief("liberty-square", "1", 0.93), 4,
+            towards = StationBelief("varketili", "1", 0.95),
+        )
+        LineScreen(network, riding.copy(estimate = e, destination = "isani"), "1", {}, {})
+    }
+
+    @Test fun tripReverseDirection() = shot("04b-trip-reverse-direction") {
+        val e = Estimate(
+            0.96, StationBelief("rustaveli", "1", 0.94), StationBelief("liberty-square", "1", 0.93), 4,
+            towards = StationBelief("varketili", "1", 0.95),
+        )
+        Trip(riding.copy(estimate = e, destination = "isani"))
+    }
 
     @Test fun confirmStation() = shot("12-confirm-station", wholeScreen = true) {
         LineScreen(network, riding, "1", {}, {}, initialConfirmStation = "marjanishvili")

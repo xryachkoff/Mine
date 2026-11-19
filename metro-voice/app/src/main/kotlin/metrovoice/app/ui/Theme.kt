@@ -67,11 +67,11 @@ private val DarkPalette = Palette(
 val LocalPalette = staticCompositionLocalOf { LightPalette }
 
 /** Type scale: 12 / 14 / 16 / 20 / 28 / 36 sp. Nothing else. */
-val Manrope = FontFamily(
-    Font(R.font.manrope_regular, FontWeight.Normal),
-    Font(R.font.manrope_medium, FontWeight.Medium),
-    Font(R.font.manrope_semibold, FontWeight.SemiBold),
-    Font(R.font.manrope_bold, FontWeight.Bold),
+val Onest = FontFamily(
+    Font(R.font.onest_regular, FontWeight.Normal),
+    Font(R.font.onest_medium, FontWeight.Medium),
+    Font(R.font.onest_semibold, FontWeight.SemiBold),
+    Font(R.font.onest_bold, FontWeight.Bold),
 )
 
 object Radius {
@@ -109,6 +109,6 @@ fun MetroTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () ->
         secondaryContainer = p.tintBlue, onSecondaryContainer = p.ink, error = p.danger,
     )
     CompositionLocalProvider(LocalPalette provides p) {
-        MaterialTheme(colorScheme = scheme, typography = Typography().withFamily(Manrope), content = content)
+        MaterialTheme(colorScheme = scheme, typography = Typography().withFamily(Onest), content = content)
     }
 }

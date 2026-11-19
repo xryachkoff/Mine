@@ -28,11 +28,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -261,6 +264,8 @@ fun TripScreen(
     val outside = e?.outside == true
     val searching = !outside && e?.current == null && next == null
     val lineId = atStation?.lineId ?: next?.lineId
+    // Direction of travel as the terminus ahead — shown only when the tracker is sure.
+    val towards = e?.towards?.takeIf { it.probability >= 0.85 && it.lineId == lineId }
     val onTint = p.ink.copy(alpha = 0.72f) // secondary text on a tinted card: muted grey would drop below 4.5:1
     val fallbackLine = lineId ?: network.lines.first().id
 
@@ -314,6 +319,15 @@ fun TripScreen(
                     Spacer(Modifier.width(8.dp))
                     Text(line.ruName(), fontSize = 14.sp, color = onTint)
                 }
+                if (towards != null) {
+                    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.width(24.dp), contentAlignment = Alignment.Center) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null, modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text("до станции ${network.ruName(towards.stationId)}", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                }
                 Spacer(Modifier.height(12.dp))
             }
             Text(
@@ -366,7 +380,7 @@ fun TripScreen(
         if (lineId != null) {
             val line = network.line(lineId)
             CardSurface(Modifier.fillMaxWidth().padding(top = 12.dp), padding = PaddingValues(start = 12.dp, end = 16.dp, top = 12.dp, bottom = 8.dp)) {
-                RouteWindow(network, line, atStation?.stationId, next?.stationId, nextKnown != null, state.destination)
+                RouteWindow(network, line, atStation?.stationId, next?.stationId, nextKnown != null, state.destination, towards?.stationId)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = { onOpenLine(line.id) }) { Text("Вся линия") }
                 }
@@ -431,28 +445,57 @@ private fun DestinationCard(network: MetroNetwork, state: UiState, currentId: St
     }
 }
 
-/** The stretch of the line that matters now: one station back, the current one, three ahead — in travel order. */
+/**
+ * The stretch of the line that matters now: one station back, the current one, three ahead — in travel
+ * order, so "down the list" is always "where the train goes". An arrow continues the line when the
+ * direction is known.
+ */
 @Composable
-private fun RouteWindow(network: MetroNetwork, line: Line, currentId: String?, nextId: String?, nextSure: Boolean, destination: String?) {
+private fun RouteWindow(network: MetroNetwork, line: Line, currentId: String?, nextId: String?, nextSure: Boolean, destination: String?, towardsId: String?) {
+    val p = LocalPalette.current
     val stations = line.stations
     val cur = stations.indexOf(currentId)
     val nxt = stations.indexOf(nextId)
-    var direction by remember(line.id) { mutableIntStateOf(1) }
-    if (cur >= 0 && nxt >= 0 && nxt != cur) direction = if (nxt > cur) 1 else -1
     val focus = if (cur >= 0) cur else nxt
     if (focus < 0) return
+    val terminus = stations.indexOf(towardsId)
+    var direction by remember(line.id) { mutableIntStateOf(1) }
+    when {
+        terminus >= 0 && terminus != focus -> direction = if (terminus > focus) 1 else -1
+        cur >= 0 && nxt >= 0 && nxt != cur -> direction = if (nxt > cur) 1 else -1
+    }
     val window = (-1..3).map { focus + it * direction }.filter { it in stations.indices }
     val color = line.displayColor()
     window.forEach { i ->
         StationRow(
             name = network.ruName(stations[i]), color = color,
             isCurrent = i == cur, isNext = i == nxt, nextSure = nextSure, isDestination = stations[i] == destination,
+            arrowDown = true.takeIf { terminus >= 0 },
         )
+    }
+    if (terminus >= 0 && window.last() != terminus) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(32.dp), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = color, modifier = Modifier.size(28.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Text("до станции ${network.ruName(stations[terminus])}", fontSize = 12.sp, color = p.muted)
+        }
     }
 }
 
 @Composable
-private fun StationRow(name: String, color: Color, isCurrent: Boolean, isNext: Boolean, nextSure: Boolean, isDestination: Boolean, modifier: Modifier = Modifier) {
+private fun StationRow(
+    name: String,
+    color: Color,
+    isCurrent: Boolean,
+    isNext: Boolean,
+    nextSure: Boolean,
+    isDestination: Boolean,
+    modifier: Modifier = Modifier,
+    /** Which way the train moves along this list, when known: the "next" tag gets an arrow. */
+    arrowDown: Boolean? = null,
+) {
     val p = LocalPalette.current
     Row(modifier.fillMaxWidth().height(IntrinsicSize.Min).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.width(32.dp).fillMaxHeight(), contentAlignment = Alignment.Center) {
@@ -470,7 +513,14 @@ private fun StationRow(name: String, color: Color, isCurrent: Boolean, isNext: B
         }
         val tag: (@Composable () -> Unit)? = when {
             isCurrent -> ({ Tag("вы здесь", color) })
-            isNext -> ({ Tag(if (nextSure) "далее" else "далее?", color) })
+            isNext -> ({
+                val arrow = arrowDown?.takeIf { nextSure }
+                Tag(
+                    if (nextSure) "далее" else "далее?", color,
+                    icon = arrow?.let { if (it) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp },
+                    iconDescription = arrow?.let { if (it) "поезд идёт вниз по списку" else "поезд идёт вверх по списку" },
+                )
+            })
             else -> null
         }
         val weight = if (isCurrent) FontWeight.Bold else FontWeight.Medium
@@ -530,6 +580,9 @@ fun LineScreen(
     val estimate = state.estimate.takeIf { state.running }
     val currentId = estimate?.current?.takeIf { it.lineId == line.id && estimate.atStationProbability > 0.5 }?.stationId
     val next = estimate?.next?.takeIf { it.lineId == line.id }
+    // The full list is in line order, so the train may move up or down it.
+    val terminus = estimate?.towards?.takeIf { it.lineId == line.id && it.probability >= 0.85 }?.let { line.stations.indexOf(it.stationId) } ?: -1
+    val arrowDown = if (terminus < 0) null else terminus == line.stations.lastIndex
     val tappable = state.running && !state.demo
     val listState = rememberLazyListState()
     val focusIndex = line.stations.indexOf(currentId ?: next?.stationId)
@@ -552,6 +605,7 @@ fun LineScreen(
                         name = network.ruName(id), color = color,
                         isCurrent = id == currentId, isNext = id == next?.stationId,
                         nextSure = (next?.probability ?: 0.0) >= 0.85, isDestination = id == state.destination,
+                        arrowDown = arrowDown,
                         modifier = Modifier.clickable(enabled = tappable, onClickLabel = "Отметить, что я на этой станции") { confirmStation = id },
                     )
                 }

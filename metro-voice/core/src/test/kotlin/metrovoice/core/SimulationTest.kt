@@ -90,11 +90,14 @@ class SimulationTest {
         val tr = Tracker(network)
         tr.setStation("technical-university")
         assertTrue(tr.estimate().next!!.probability < 0.6)
+        assertTrue(tr.estimate().towards!!.probability < 0.6, "no direction claimed while it is unknown")
         tr.setStation("tsereteli")
         val e = tr.estimate()
         assertEquals("tsereteli", e.current?.stationId)
         assertEquals("station-square-2", e.next?.stationId)
         assertTrue(e.next!!.probability > 0.9, "next ${e.next}")
+        assertEquals("station-square-2", e.towards?.stationId, "direction is named by the terminus ahead")
+        assertTrue(e.towards!!.probability > 0.9)
         tr.setStation("tsereteli") // tapping the same station again must not lose it
         assertTrue(tr.estimate().next!!.probability > 0.9)
     }

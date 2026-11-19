@@ -36,6 +36,8 @@ data class Estimate(
     val hypothesisCount: Int,
     /** The rider has left the metro (accurate fixes away from every station): nothing is tracked. */
     val outside: Boolean = false,
+    /** Direction of travel, named the way metros name it: the terminus the train is heading to. */
+    val towards: StationBelief? = null,
 )
 
 /**
@@ -362,7 +364,18 @@ class Tracker(
             .groupBy { it.first to it.second }
             .map { (k, v) -> StationBelief(k.first, k.second, v.sumOf { it.third }) }
             .maxByOrNull { it.probability }
-        return Estimate(atStation, current, next, hypotheses.size, outside)
+        val towards = hypotheses
+            .map { h ->
+                val stations = network.line(h.lineId).stations
+                // Standing at a terminus facing outwards: the only way is back.
+                val p = h.position
+                val dir = if (p is Position.At && !network.isValidIndex(h.lineId, p.index + h.direction)) -h.direction else h.direction
+                Triple(if (dir > 0) stations.last() else stations.first(), h.lineId, h.weight)
+            }
+            .groupBy { it.first to it.second }
+            .map { (k, v) -> StationBelief(k.first, k.second, v.sumOf { it.third }) }
+            .maxByOrNull { it.probability }
+        return Estimate(atStation, current, next, hypotheses.size, outside, towards)
     }
 
     // --- internals -------------------------------------------------------------------------

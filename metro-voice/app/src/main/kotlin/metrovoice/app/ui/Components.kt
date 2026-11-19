@@ -183,11 +183,14 @@ fun LineBadge(line: Line, modifier: Modifier = Modifier, size: Dp = 28.dp) {
     }
 }
 
-/** Small status label on a coloured pill: "вы здесь", "далее". */
+/** Small status label on a coloured pill: "вы здесь", "далее". [icon] shows the direction of travel. */
 @Composable
-fun Tag(text: String, color: Color) {
+fun Tag(text: String, color: Color, icon: ImageVector? = null, iconDescription: String? = null) {
     Surface(shape = RoundedCornerShape(50), color = color, modifier = Modifier.padding(vertical = 4.dp)) {
-        Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.padding(horizontal = 10.dp, vertical = 2.dp))
+        Row(Modifier.padding(start = if (icon != null) 6.dp else 10.dp, end = 10.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (icon != null) Icon(icon, contentDescription = iconDescription, tint = Color.White, modifier = Modifier.size(18.dp))
+            Text(text, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        }
     }
 }
 
