@@ -281,3 +281,10 @@ fun stationsCount(n: Int): String = "$n " + when {
     n % 10 in 2..4 -> "станции"
     else -> "станций"
 }
+
+fun tripsCount(n: Int): String = "$n " + when {
+    n % 100 in 11..14 -> "поездок"
+    n % 10 == 1 -> "поездка"
+    n % 10 in 2..4 -> "поездки"
+    else -> "поездок"
+}

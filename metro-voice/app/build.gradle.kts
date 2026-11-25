@@ -21,8 +21,8 @@ android {
         applicationId = "metrovoice.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "0.6.2"
+        versionCode = 11
+        versionName = "0.7.0"
     }
 
     // Shared debug key so the SHA-1 registered in Firebase stays the same across machines.

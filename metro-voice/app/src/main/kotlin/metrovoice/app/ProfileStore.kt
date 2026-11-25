@@ -11,12 +11,22 @@ data class Profile(
     val muted: Boolean = false,
     /** Languages spoken, in order. Never empty. */
     val languages: List<String> = ALL_LANGUAGES,
-    /** Start a trip by itself when the phone comes near a station (needs background location). */
-    val autoStart: Boolean = false,
+    /** What to do when the phone comes near a station (anything but OFF needs background location). */
+    val nearStation: NearStation = NearStation.OFF,
 ) {
+    val autoStart: Boolean get() = nearStation == NearStation.AUTO
+
     companion object {
         val ALL_LANGUAGES = listOf("ru", "en")
     }
+}
+
+enum class NearStation {
+    OFF,
+    /** A notification "start a trip?" at the rider's own stations: home, work, the frequent ones. */
+    REMIND,
+    /** Start the trip without asking, at any station; it stays silent until the rider really travels. */
+    AUTO,
 }
 
 /** Local profile and settings (on the phone only). Cloud sync can come later on top of the signed-in account. */
@@ -27,7 +37,8 @@ object ProfileStore {
     private const val KEY_GUEST = "guest"
     private const val KEY_MUTED = "muted"
     private const val KEY_LANGUAGES = "languages"
-    private const val KEY_AUTO_START = "autoStart"
+    private const val KEY_AUTO_START = "autoStart" // before 0.7: a plain on/off switch
+    private const val KEY_NEAR_STATION = "nearStation"
 
     private val _profile = MutableStateFlow(Profile())
     val profile: StateFlow<Profile> = _profile
@@ -42,7 +53,8 @@ object ProfileStore {
             workStationId = p.getString(KEY_WORK, null),
             muted = p.getBoolean(KEY_MUTED, false),
             languages = languages?.takeIf { it.isNotEmpty() } ?: Profile.ALL_LANGUAGES,
-            autoStart = p.getBoolean(KEY_AUTO_START, false),
+            nearStation = p.getString(KEY_NEAR_STATION, null)?.let { runCatching { NearStation.valueOf(it) }.getOrNull() }
+                ?: if (p.getBoolean(KEY_AUTO_START, false)) NearStation.AUTO else NearStation.OFF,
         )
     }
 
@@ -61,9 +73,9 @@ object ProfileStore {
         _profile.value = _profile.value.copy(muted = muted)
     }
 
-    fun setAutoStart(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_AUTO_START, enabled).apply()
-        _profile.value = _profile.value.copy(autoStart = enabled)
+    fun setNearStation(context: Context, mode: NearStation) {
+        prefs(context).edit().putString(KEY_NEAR_STATION, mode.name).apply()
+        _profile.value = _profile.value.copy(nearStation = mode)
     }
 
     /** Turns one language on or off; the last remaining language cannot be turned off. */

@@ -40,7 +40,7 @@ class ScreenshotTest {
     @get:Rule val compose = createComposeRule()
 
     private val network = MetroNetwork(MetroGraph.parse(File("src/main/assets/cities/tbilisi.json").readText()))
-    private val profile = Profile(homeStationId = "didube", workStationId = "rustaveli", autoStart = true)
+    private val profile = Profile(homeStationId = "didube", workStationId = "rustaveli", nearStation = NearStation.REMIND)
 
     private fun shot(name: String, dark: Boolean = false, wholeScreen: Boolean = false, content: @Composable () -> Unit) {
         compose.setContent { MetroTheme(dark = dark) { Surface(color = LocalPalette.current.canvas) { content() } } }
@@ -69,9 +69,14 @@ class ScreenshotTest {
         lastFixElapsedMs = now - 55_000,
     )
 
+    private val stats = TripStats(
+        arrivals = mapOf("didube" to 14, "rustaveli" to 11, "technical-university" to 5, "avlabari" to 2, "isani" to 1),
+        departures = mapOf("didube" to 13, "rustaveli" to 12, "technical-university" to 4),
+    )
+
     @Composable
-    private fun Home(profile: Profile = this.profile, destination: String? = "didube") =
-        HomeScreen(network, profile, destination, {}, {}, {}, {}, {}, {}, {}, {})
+    private fun Home(profile: Profile = this.profile, destination: String? = "didube", stats: TripStats = this.stats) =
+        HomeScreen(network, profile, destination, {}, {}, {}, {}, {}, {}, {}, {}, stats)
 
     @Composable
     private fun Trip(state: UiState, profile: Profile = this.profile) =
@@ -79,7 +84,7 @@ class ScreenshotTest {
 
     @Test fun home() = shot("01-home") { Home() }
 
-    @Test fun homeFirstRun() = shot("02-home-first-run") { Home(Profile(), null) }
+    @Test fun homeFirstRun() = shot("02-home-first-run") { Home(Profile(), null, TripStats()) }
 
     @Test fun homeDark() = shot("03-home-dark", dark = true) { Home() }
 
@@ -135,7 +140,7 @@ class ScreenshotTest {
         ProfileScreen(
             network, Account("u1", "Ника Б.", "nika@example.com", "google.com"), profile, signInAvailable = true,
             onBack = {}, onSetHome = {}, onSetWork = {}, onToggleMute = {}, onToggleLanguage = {}, onTestVoice = {},
-            onToggleAutoStart = {}, onDemo = {}, onSignOut = {},
+            onNearStation = {}, onDemo = {}, onSignOut = {},
         )
     }
 
@@ -154,6 +159,7 @@ class ScreenshotTest {
         StationPickerDialog(
             network, "Куда едете?", onPick = {}, onDismiss = {},
             shortcuts = listOf("didube" to "Домой · Дидубе", "rustaveli" to "На работу · Руставели"), onClear = {},
+            frequent = stats.arrivals,
         )
     }
 

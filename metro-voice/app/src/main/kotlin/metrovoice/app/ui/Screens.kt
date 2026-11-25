@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -40,10 +41,12 @@ import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -61,14 +64,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import metrovoice.app.Account
+import metrovoice.app.NearStation
 import metrovoice.app.Profile
 import metrovoice.app.TripInfo
+import metrovoice.app.TripStats
 import metrovoice.app.UiState
 import metrovoice.core.graph.Line
 import metrovoice.core.graph.MetroNetwork
@@ -95,9 +101,13 @@ fun HomeScreen(
     onDestination: (String?) -> Unit,
     onSetHome: (String) -> Unit,
     onSetWork: (String) -> Unit,
+    /** The rider's own trips of the last month: offers the usual destinations first. */
+    stats: TripStats = TripStats(),
 ) {
     val p = LocalPalette.current
     var picking by remember { mutableStateOf<String?>(null) } // "home" | "work" | "other"
+    fun monthly(id: String?) = id?.let { stats.arrivals[it] }?.takeIf { it > 0 }?.let { "${tripsCount(it)} за месяц" }
+    val frequent = stats.frequentDestinations(exclude = setOf(profile.homeStationId, profile.workStationId))
 
     ScreenColumn(
         scroll = true,
@@ -118,7 +128,11 @@ fun HomeScreen(
                     Text("Готов к поездке", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        if (profile.autoStart) "Начну сам, когда подойдёте к станции." else "Назову станцию и следующую — прямо в наушники.",
+                        when (profile.nearStation) {
+                            NearStation.AUTO -> "Начну сам, когда подойдёте к станции."
+                            NearStation.REMIND -> "Напомню у ваших станций."
+                            NearStation.OFF -> "Назову станцию и следующую — прямо в наушники."
+                        },
                         fontSize = 14.sp, color = p.ink.copy(alpha = 0.72f),
                     )
                     Spacer(Modifier.height(12.dp))
@@ -133,14 +147,24 @@ fun HomeScreen(
             PlaceTile(
                 Icons.Default.Home, "Дом", profile.homeStationId?.let(network::ruName),
                 selected = destination != null && destination == profile.homeStationId,
+                note = monthly(profile.homeStationId),
                 onClick = { profile.homeStationId?.let { onDestination(if (destination == it) null else it) } ?: run { picking = "home" } },
             )
             PlaceTile(
                 AppIcons.Work, "Работа", profile.workStationId?.let(network::ruName),
                 selected = destination != null && destination == profile.workStationId,
+                note = monthly(profile.workStationId),
                 onClick = { profile.workStationId?.let { onDestination(if (destination == it) null else it) } ?: run { picking = "work" } },
             )
-            val other = destination?.takeIf { it != profile.homeStationId && it != profile.workStationId }
+            // Where this rider actually goes, from their own trips: one tap instead of a search.
+            frequent.forEach { (id, count) ->
+                PlaceTile(
+                    Icons.Default.Star, "Часто ездите", network.ruName(id),
+                    selected = destination == id, note = "${tripsCount(count)} за месяц",
+                    onClick = { onDestination(if (destination == id) null else id) },
+                )
+            }
+            val other = destination?.takeIf { d -> d != profile.homeStationId && d != profile.workStationId && frequent.none { it.first == d } }
             PlaceTile(
                 AppIcons.Flag, "Другая станция", other?.let(network::ruName),
                 selected = other != null, emptyLabel = "Выбрать",
@@ -166,6 +190,7 @@ fun HomeScreen(
         StationPickerDialog(
             network,
             title = when (which) { "home" -> "Станция у дома"; "work" -> "Станция у работы"; else -> "Куда едете?" },
+            frequent = stats.arrivals,
             onPick = { id ->
                 when (which) { "home" -> onSetHome(id); "work" -> onSetWork(id) }
                 onDestination(id)
@@ -189,7 +214,16 @@ private fun CityPill(city: String) {
 }
 
 @Composable
-private fun PlaceTile(icon: ImageVector, label: String, station: String?, selected: Boolean, onClick: () -> Unit, emptyLabel: String = "Указать") {
+private fun PlaceTile(
+    icon: ImageVector,
+    label: String,
+    station: String?,
+    selected: Boolean,
+    onClick: () -> Unit,
+    emptyLabel: String = "Указать",
+    /** Third line, e.g. "5 поездок за месяц". */
+    note: String? = null,
+) {
     val p = LocalPalette.current
     Surface(
         onClick = onClick, shape = RoundedCornerShape(Radius.tile),
@@ -213,6 +247,9 @@ private fun PlaceTile(icon: ImageVector, label: String, station: String?, select
                 station ?: emptyLabel, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
                 maxLines = 2, overflow = TextOverflow.Ellipsis,
             )
+            if (note != null && station != null) {
+                Text(note, fontSize = 12.sp, color = if (selected) p.ink.copy(alpha = 0.72f) else p.muted, maxLines = 1)
+            }
         }
     }
 }
@@ -252,6 +289,7 @@ fun TripScreen(
     onOpenLine: (String) -> Unit,
     onDestination: (String?) -> Unit,
     onToggleMute: () -> Unit,
+    stats: TripStats = TripStats(),
 ) {
     val p = LocalPalette.current
     var confirmStop by remember { mutableStateOf(false) }
@@ -400,6 +438,7 @@ fun TripScreen(
                 profile.workStationId?.let { it to "На работу · ${network.ruName(it)}" },
             ),
             onClear = if (state.destination != null) ({ onDestination(null); pickingDestination = false }) else null,
+            frequent = stats.arrivals,
             onPick = { onDestination(it); pickingDestination = false },
             onDismiss = { pickingDestination = false },
         )
@@ -714,7 +753,7 @@ fun ProfileScreen(
     onToggleMute: () -> Unit,
     onToggleLanguage: (String) -> Unit,
     onTestVoice: () -> Unit,
-    onToggleAutoStart: () -> Unit,
+    onNearStation: (NearStation) -> Unit,
     onDemo: () -> Unit,
     onSignOut: () -> Unit,
 ) {
@@ -761,15 +800,25 @@ fun ProfileScreen(
         }
         PillButton("Проверить голос", onTestVoice, Modifier.padding(top = 12.dp), icon = AppIcons.VolumeUp)
 
-        SectionTitle("Автоматика")
+        SectionTitle("У станции метро")
         CardSurface(Modifier.fillMaxWidth(), padding = PaddingValues(horizontal = 16.dp, vertical = 4.dp)) {
-            SwitchRow("Начинать поездку у станции", profile.autoStart) { onToggleAutoStart() }
-            Text(
-                "Запускается сама, когда вы подходите к станции, и молчит, пока вы не поедете. Нужен доступ к геолокации " +
-                    "«Разрешать всегда». Завершается поездка сама в любом случае — через пару минут после выхода из метро.",
-                fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(bottom = 12.dp),
-            )
+            ChoiceRow("Ничего не делать", null, profile.nearStation == NearStation.OFF) { onNearStation(NearStation.OFF) }
+            HorizontalDivider(color = p.outline)
+            ChoiceRow(
+                "Напомнить", "Уведомление «Включить Metro Voice?» у ваших станций: дом, работа и те, откуда вы часто ездите.",
+                profile.nearStation == NearStation.REMIND,
+            ) { onNearStation(NearStation.REMIND) }
+            HorizontalDivider(color = p.outline)
+            ChoiceRow(
+                "Начинать поездку самому", "У любой станции, без вопросов. Молчит, пока вы действительно не поедете.",
+                profile.nearStation == NearStation.AUTO,
+            ) { onNearStation(NearStation.AUTO) }
         }
+        Text(
+            "Для напоминаний и автозапуска нужен доступ к геолокации «Разрешать всегда»: о приближении к станции приложению " +
+                "сообщает система, само оно в фоне не работает. Завершается поездка сама в любом случае — через пару минут после выхода из метро.",
+            fontSize = 12.sp, color = p.muted, modifier = Modifier.padding(top = 8.dp),
+        )
 
         SectionTitle("Проверка")
         CardSurface(Modifier.fillMaxWidth(), color = p.tintCream) {
@@ -821,6 +870,22 @@ private fun PlaceRow(icon: ImageVector, label: String, value: String?, onClick: 
 }
 
 @Composable
+private fun ChoiceRow(title: String, description: String?, selected: Boolean, onSelect: () -> Unit) {
+    val p = LocalPalette.current
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).selectable(selected = selected, role = Role.RadioButton, onClick = onSelect).padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            if (description != null) Text(description, fontSize = 12.sp, color = p.muted)
+        }
+        Spacer(Modifier.width(12.dp))
+        RadioButton(selected = selected, onClick = null)
+    }
+}
+
+@Composable
 private fun SwitchRow(label: String, checked: Boolean, enabled: Boolean = true, onToggle: () -> Unit) {
     Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(enabled = enabled, onClick = onToggle), verticalAlignment = Alignment.CenterVertically) {
         Text(label, fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
@@ -839,18 +904,32 @@ fun StationPickerDialog(
     onDismiss: () -> Unit,
     shortcuts: List<Pair<String, String>> = emptyList(),
     onClear: (() -> Unit)? = null,
+    /** Trips to each station in the last month: the usual ones go first, with the count. */
+    frequent: Map<String, Int> = emptyMap(),
 ) {
     val p = LocalPalette.current
+    val usual = frequent.filter { it.value >= 2 && shortcuts.none { s -> s.first == it.key } }.toList().sortedByDescending { it.second }.take(5)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title, fontWeight = FontWeight.SemiBold) },
         text = {
             LazyColumn(Modifier.heightIn(max = 440.dp)) {
                 items(shortcuts, key = { "s-${it.first}" }) { (id, label) ->
-                    Text(label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { onPick(id) }.padding(vertical = 12.dp))
+                    Text(label, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = p.ink, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { onPick(id) }.padding(vertical = 12.dp))
                 }
                 if (onClear != null) item(key = "clear") {
                     Text("Без цели", fontSize = 16.sp, color = p.muted, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClick = onClear).padding(vertical = 12.dp))
+                }
+                if (usual.isNotEmpty()) {
+                    item(key = "h-usual") {
+                        Text("Часто ездите", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = p.ink, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                    }
+                    items(usual, key = { "u-${it.first}" }) { (id, count) ->
+                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { onPick(id) }, verticalAlignment = Alignment.CenterVertically) {
+                            Text(network.ruName(id), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = p.ink, modifier = Modifier.weight(1f))
+                            Text("${tripsCount(count)} за месяц", fontSize = 12.sp, color = p.muted)
+                        }
+                    }
                 }
                 network.lines.forEach { line ->
                     item(key = "h-${line.id}") {

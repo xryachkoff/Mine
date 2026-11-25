@@ -101,9 +101,53 @@ object TripHistory {
                 )
             }
 
+    /** Stations passed on each recorded trip of the last [days] days, newest first. */
+    fun recentRoutes(context: Context, days: Int = 30): List<List<String>> {
+        val since = System.currentTimeMillis() - days * 86_400_000L
+        return CityRepository.tripsDir(context).listFiles().orEmpty()
+            .filter(::isTrip)
+            .sortedByDescending { it.name }
+            .mapNotNull { f ->
+                val start = runCatching { nameFormat.parse(f.name.removePrefix("trip-").substringBefore('.')) }.getOrNull()
+                if (start == null || start.time < since) return@mapNotNull null
+                runCatching { stationsFile(f).readLines().filter { it.isNotBlank() } }.getOrNull()?.takeIf { it.size >= 2 }
+            }
+    }
+
     fun delete(path: String) {
         val f = File(path)
         stationsFile(f).delete()
         f.delete()
+    }
+}
+
+/**
+ * What the rider's own history says about where they go. Counted on the phone from the recorded
+ * trips of the last 30 days; nothing leaves the device.
+ */
+data class TripStats(
+    /** Trips that ended at the station. */
+    val arrivals: Map<String, Int> = emptyMap(),
+    /** Trips that started at the station. */
+    val departures: Map<String, Int> = emptyMap(),
+) {
+    /** Stations worth offering as a destination, most visited first. Once is chance, twice is a habit. */
+    fun frequentDestinations(exclude: Set<String?>, limit: Int = 3): List<Pair<String, Int>> =
+        arrivals.filter { it.value >= 2 && it.key !in exclude }.toList().sortedByDescending { it.second }.take(limit)
+
+    /** Stations the rider enters the metro at: home, work, and wherever trips usually start or end. */
+    fun ownStations(profile: Profile, limit: Int = 3): Set<String> {
+        val totals = (arrivals.keys + departures.keys).associateWith { (arrivals[it] ?: 0) + (departures[it] ?: 0) }
+        return setOfNotNull(profile.homeStationId, profile.workStationId) +
+            totals.filter { it.value >= 2 }.toList().sortedByDescending { it.second }.take(limit).map { it.first }
+    }
+
+    companion object {
+        fun of(routes: List<List<String>>) = TripStats(
+            arrivals = routes.groupingBy { it.last() }.eachCount(),
+            departures = routes.groupingBy { it.first() }.eachCount(),
+        )
+
+        fun load(context: Context): TripStats = of(TripHistory.recentRoutes(context))
     }
 }

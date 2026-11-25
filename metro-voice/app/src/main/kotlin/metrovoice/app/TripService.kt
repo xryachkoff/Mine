@@ -147,6 +147,7 @@ class TripService : LifecycleService() {
         }.isSuccess
         // Location permission revoked, or the system refused a background start: nothing to run.
         if (!started || net == null) { stopSelf(); return }
+        getSystemService(NotificationManager::class.java).cancel(AutoStart.PROMPT_NOTIFICATION_ID) // the reminder did its job
         network = net
         autoStarted = auto
         // A trip that started by itself stays silent until the rider really travels: walking past a
@@ -165,7 +166,7 @@ class TripService : LifecycleService() {
         speaker = Speaker(this) { lang -> TripBus.update { it.copy(missingVoices = it.missingVoices + lang) } }
 
         handler.post {
-            trace?.write(TraceRecord.Meta(0.0, net.graph.city, "${Build.MANUFACTURER} ${Build.MODEL} API ${Build.VERSION.SDK_INT}", "0.6.2"))
+            trace?.write(TraceRecord.Meta(0.0, net.graph.city, "${Build.MANUFACTURER} ${Build.MODEL} API ${Build.VERSION.SDK_INT}", "0.7.0"))
             engine = TripEngine(net, listOf("ru", "en"), listener = EngineListener()).also { e ->
                 TripBus.state.value.destination?.let {
                     trace?.write(TraceRecord.Dest(0.0, it))
@@ -215,6 +216,7 @@ class TripService : LifecycleService() {
         }
         speaker?.shutdown()
         engine = null
+        if (visited.size >= 2) AutoStart.sync(this) // a finished trip may change which stations count as "mine"
         TripBus.update { it.copy(running = false, phase = "—", estimate = null, lastSaid = null) }
         super.onDestroy()
     }
@@ -225,7 +227,7 @@ class TripService : LifecycleService() {
         override fun onAnnouncements(announcements: List<Announcement>) {
             val t = now()
             announcements.forEach { trace?.write(TraceRecord.Say(t, it.key, it.text)) }
-            val station = announcements.firstOrNull { it.kind == AnnouncementKind.STATION }?.stationId
+            val station = announcements.firstOrNull { it.kind == AnnouncementKind.STATION || it.kind == AnnouncementKind.APPROACHING }?.stationId
             if (station != null && station != silentAtStation) silentAtStation = null
             val settings = ProfileStore.profile.value
             if (!settings.muted && silentAtStation == null) {
@@ -296,7 +298,7 @@ class TripService : LifecycleService() {
         // A self-started trip that went nowhere (walked past a station) ends without a word.
         if (!(autoStarted && visited.size < 2)) {
             val n = NotificationCompat.Builder(this, CHANNEL)
-                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                .setSmallIcon(R.drawable.ic_stat_metro)
                 .setContentTitle("Поездка завершена")
                 .setContentText("$reason$route Запись сохранена в истории.")
                 .setStyle(NotificationCompat.BigTextStyle().bigText("$reason$route Запись сохранена в истории."))
@@ -440,7 +442,7 @@ class TripService : LifecycleService() {
         PendingIntent.getService(this, requestCode, Intent(this, TripService::class.java).setAction(action), PendingIntent.FLAG_IMMUTABLE)
 
     private fun notification() = NotificationCompat.Builder(this, CHANNEL)
-        .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+        .setSmallIcon(R.drawable.ic_stat_metro)
         .setContentTitle(lastTitle)
         .setContentText(lastText)
         .setOngoing(true)

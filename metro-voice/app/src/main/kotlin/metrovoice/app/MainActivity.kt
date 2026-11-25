@@ -102,8 +102,9 @@ class MainActivity : ComponentActivity() {
         }
 
         // Auto-start needs "allow all the time", which Android only grants in a second, separate step.
+        var wantedMode by rememberSaveable { mutableStateOf(NearStation.OFF) }
         fun enableAutoStart() {
-            ProfileStore.setAutoStart(this, true)
+            ProfileStore.setNearStation(this, wantedMode)
             AutoStart.sync(this)
         }
         val backgroundLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -147,6 +148,8 @@ class MainActivity : ComponentActivity() {
             busy = false
         }
 
+        // Recounted when a trip ends: the usual destinations may have changed.
+        val stats = remember(state.running) { TripStats.load(this) }
         val acc = account
         when {
             acc == null -> WelcomeScreen(
@@ -164,16 +167,17 @@ class MainActivity : ComponentActivity() {
                     profile = profile,
                     signInAvailable = AuthManager.isConfigured(this),
                     onBack = { screen = "main" },
-                    onSetHome = { ProfileStore.setHome(this, it) },
-                    onSetWork = { ProfileStore.setWork(this, it) },
+                    onSetHome = { ProfileStore.setHome(this, it); AutoStart.sync(this) },
+                    onSetWork = { ProfileStore.setWork(this, it); AutoStart.sync(this) },
                     onToggleMute = { ProfileStore.setMuted(this, !profile.muted) },
                     onToggleLanguage = { ProfileStore.toggleLanguage(this, it) },
                     onTestVoice = { testVoice(network) },
-                    onToggleAutoStart = {
-                        if (profile.autoStart) {
-                            ProfileStore.setAutoStart(this, false)
+                    onNearStation = { mode ->
+                        if (mode == NearStation.OFF) {
+                            ProfileStore.setNearStation(this, mode)
                             AutoStart.sync(this)
                         } else {
+                            wantedMode = mode
                             autoStartLauncher.launch(requiredPermissions)
                         }
                     },
@@ -232,6 +236,7 @@ class MainActivity : ComponentActivity() {
                     onOpenLine = { screen = "line:$it" },
                     onDestination = ::setDestination,
                     onToggleMute = { ProfileStore.setMuted(this, !profile.muted) },
+                    stats = stats,
                 )
             }
             else -> HomeScreen(
@@ -244,8 +249,9 @@ class MainActivity : ComponentActivity() {
                 onProfile = { screen = "profile" },
                 onOpenLine = { screen = "line:$it" },
                 onDestination = ::setDestination,
-                onSetHome = { ProfileStore.setHome(this, it) },
-                onSetWork = { ProfileStore.setWork(this, it) },
+                onSetHome = { ProfileStore.setHome(this, it); AutoStart.sync(this) },
+                onSetWork = { ProfileStore.setWork(this, it); AutoStart.sync(this) },
+                stats = stats,
             )
         }
     }
@@ -305,7 +311,7 @@ private enum class Notice(val title: String, val text: String) {
     ),
     NEEDS_ALWAYS(
         "Нужен доступ «Разрешать всегда»",
-        "Чтобы поездка начиналась сама у станции, приложению нужна геолокация в фоне. Настройки → Разрешения → Местоположение → «Разрешать всегда». Вне поездки приложение не следит за вами: о приближении к станции ему сообщает система.",
+        "Чтобы напоминать или начинать поездку у станции, приложению нужна геолокация в фоне. Настройки → Разрешения → Местоположение → «Разрешать всегда». Вне поездки приложение не следит за вами: о приближении к станции ему сообщает система.",
     ),
     LOCATION_OFF(
         "Геолокация выключена",
