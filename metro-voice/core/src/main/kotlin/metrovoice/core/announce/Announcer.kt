@@ -11,6 +11,8 @@ enum class AnnouncementKind {
     APPROACHING,
     NEXT_STATION,
     DIRECTION_UNKNOWN,
+    /** The rider's destination is reached: a goodbye instead of "next station". */
+    ARRIVED,
 }
 
 /**
@@ -35,6 +37,9 @@ object Phrases {
             "approaching" to "Arriving at {station}.",
             "next" to "Next station: {station}.",
             "direction_unknown" to "Confirming direction at the next station.",
+            "next_destination" to "Next station: {station}. This is your stop.",
+            "approaching_destination" to "Arriving at {station}. This is your stop.",
+            "arrived" to "You have arrived. Have a great day!",
         ),
         "ru" to mapOf(
             "station" to "Станция {station}.",
@@ -42,6 +47,9 @@ object Phrases {
             "approaching" to "Подъезжаем к станции {station}.",
             "next" to "Следующая станция — {station}.",
             "direction_unknown" to "Направление уточню на следующей станции.",
+            "next_destination" to "Следующая станция — {station}. Вам выходить.",
+            "approaching_destination" to "Подъезжаем к станции {station}. Ваша остановка.",
+            "arrived" to "Приехали. Хорошего дня!",
         ),
     )
 
@@ -69,11 +77,26 @@ class Announcer(
     private var lastStationSaid: String? = null
     private var lastNextSaid: String? = null
     private var directionWarningGiven = false
+    private var arrivedSaidFor: String? = null
+    /** Stations announced on this ride: "you have arrived" needs a ride, not a destination equal to the entry station. */
+    private val seen = HashSet<String>()
+
+    /**
+     * Where the rider is going. The station before it is announced with "this is your stop", and at
+     * the destination the rider hears a goodbye instead of the next station.
+     */
+    var destination: String? = null
+        set(value) {
+            if (field != value) arrivedSaidFor = null
+            field = value
+        }
 
     fun reset() {
         lastStationSaid = null
         lastNextSaid = null
         directionWarningGiven = false
+        arrivedSaidFor = null
+        seen.clear()
     }
 
     /** Call whenever the estimate may say "standing at a station": after a stop, a fix, or user input. */
@@ -82,10 +105,20 @@ class Announcer(
         if (current.probability < threshold || estimate.atStationProbability < threshold) return emptyList()
         val out = mutableListOf<Announcement>()
 
+        val atDestination = current.stationId == destination && (seen - current.stationId).isNotEmpty()
         if (current.stationId != lastStationSaid) {
             lastStationSaid = current.stationId
             lastNextSaid = null
-            out += stationPhrase(AnnouncementKind.STATION, "station", current.stationId, current.lineId)
+            seen += current.stationId
+            out += stationPhrase(AnnouncementKind.STATION, "station", current.stationId, current.lineId, transfers = !atDestination)
+        }
+        if (atDestination) {
+            // Journey over: no "next station", no talk about direction.
+            if (arrivedSaidFor != current.stationId) {
+                arrivedSaidFor = current.stationId
+                out += languages.map { lang -> Announcement(AnnouncementKind.ARRIVED, current.stationId, lang, Phrases.get(lang, "arrived")) }
+            }
+            return out
         }
 
         val next = nextToSay(estimate)
@@ -110,11 +143,16 @@ class Announcer(
         if (approach.stationId == lastStationSaid) return emptyList()
         lastStationSaid = approach.stationId
         lastNextSaid = null
-        return stationPhrase(AnnouncementKind.APPROACHING, "approaching", approach.stationId, approach.lineId)
+        seen += approach.stationId
+        val mine = approach.stationId == destination
+        return stationPhrase(
+            AnnouncementKind.APPROACHING, if (mine) "approaching_destination" else "approaching",
+            approach.stationId, approach.lineId, transfers = !mine,
+        )
     }
 
-    private fun stationPhrase(kind: AnnouncementKind, template: String, stationId: String, lineId: String): List<Announcement> {
-        val transferLines = network.transferLines(lineId, stationId)
+    private fun stationPhrase(kind: AnnouncementKind, template: String, stationId: String, lineId: String, transfers: Boolean = true): List<Announcement> {
+        val transferLines = if (transfers) network.transferLines(lineId, stationId) else emptyList()
         return languages.map { lang ->
             var text = Phrases.get(lang, template).replace("{station}", name(stationId, lang))
             if (transferLines.isNotEmpty()) {
@@ -136,7 +174,7 @@ class Announcer(
         return languages.map { lang ->
             Announcement(
                 AnnouncementKind.NEXT_STATION, next.stationId, lang,
-                Phrases.get(lang, "next").replace("{station}", name(next.stationId, lang)),
+                Phrases.get(lang, if (next.stationId == destination) "next_destination" else "next").replace("{station}", name(next.stationId, lang)),
             )
         }
     }

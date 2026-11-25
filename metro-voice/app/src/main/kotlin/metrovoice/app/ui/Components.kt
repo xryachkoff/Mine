@@ -225,45 +225,49 @@ fun Tag(text: String, color: Color, arrowDown: Boolean? = null) {
 }
 
 /**
- * Front of a train with sound waves: the app's one illustration, drawn in code so it follows the theme
- * and the line colour. A slot for richer artwork per transport mode later ([mode]).
+ * The app's mascot: the front of a train wearing headphones. Drawn in code so it follows the theme
+ * and the line colour; same shapes as the launcher icon. A slot for richer artwork per mode later.
  */
 @Composable
 fun ModeIllustration(mode: String, accent: Color, modifier: Modifier = Modifier) {
     val p = LocalPalette.current
     val body = if (p.dark) Color(0xFF2B2B2B) else Color.White
     val glass = if (p.dark) Color(0xFF0E0E0E) else p.ink
+    val phones = if (p.dark) Color(0xFFF2F2F2) else p.ink
     val rail = p.ink.copy(alpha = 0.25f)
     Canvas(modifier) {
         val w = size.width
         val h = size.height
         val bw = w * 0.56f
-        val bh = h * 0.74f
-        val left = w * 0.10f
-        val top = h * 0.10f
-        val r = CornerRadius(bw * 0.20f)
+        val bh = h * 0.62f
+        val left = (w - bw) / 2
+        val top = h * 0.24f
+        val r = CornerRadius(bw * 0.24f)
         // Tram and bus get a flatter roof; the train is taller. Enough to tell them apart at a glance.
         val roof = if (mode == "subway") 0f else bh * 0.10f
+        // Headband first, so the body covers its ends.
+        val bandW = bw * 1.20f
+        val bandTop = top - h * 0.16f
+        drawArc(
+            phones, startAngle = 180f, sweepAngle = 180f, useCenter = false,
+            topLeft = Offset((w - bandW) / 2, bandTop), size = Size(bandW, (top + bh * 0.30f - bandTop) * 2),
+            style = Stroke(w * 0.045f, cap = StrokeCap.Round),
+        )
         drawRoundRect(body, Offset(left, top + roof), Size(bw, bh - roof), r)
         drawRoundRect(p.ink.copy(alpha = 0.10f), Offset(left, top + roof), Size(bw, bh - roof), r, style = Stroke(w * 0.012f))
-        drawRoundRect(glass, Offset(left + bw * 0.13f, top + roof + bh * 0.12f), Size(bw * 0.74f, bh * 0.34f), CornerRadius(bw * 0.10f))
-        drawRect(accent, Offset(left, top + bh * 0.58f), Size(bw, bh * 0.11f))
+        drawRoundRect(glass, Offset(left + bw * 0.15f, top + roof + bh * 0.13f), Size(bw * 0.70f, bh * 0.31f), CornerRadius(bw * 0.12f))
+        drawRect(accent, Offset(left, top + bh * 0.58f), Size(bw, bh * 0.10f))
         val lampY = top + bh * 0.83f
-        drawCircle(Color(0xFFFFD66B), bw * 0.065f, Offset(left + bw * 0.22f, lampY))
-        drawCircle(Color(0xFFFFD66B), bw * 0.065f, Offset(left + bw * 0.78f, lampY))
+        drawCircle(Color(0xFFFFC94A), bw * 0.07f, Offset(left + bw * 0.23f, lampY))
+        drawCircle(Color(0xFFFFC94A), bw * 0.07f, Offset(left + bw * 0.77f, lampY))
+        // Ear cups over the sides of the cab.
+        val cupW = bw * 0.24f
+        val cupH = bh * 0.36f
+        val cupY = top + bh * 0.12f
+        drawRoundRect(phones, Offset(left - cupW * 0.68f, cupY), Size(cupW, cupH), CornerRadius(cupW * 0.42f))
+        drawRoundRect(phones, Offset(left + bw - cupW * 0.32f, cupY), Size(cupW, cupH), CornerRadius(cupW * 0.42f))
         val railY = top + bh + h * 0.07f
-        drawLine(rail, Offset(left - w * 0.04f, railY), Offset(left + bw + w * 0.04f, railY), w * 0.02f, StrokeCap.Round)
-        // Sound waves: the announcements.
-        val cx = left + bw + w * 0.02f
-        val cy = top + bh * 0.30f
-        for (i in 1..3) {
-            val rad = w * (0.05f + 0.06f * i)
-            drawArc(
-                p.ink.copy(alpha = 0.55f - 0.13f * i), startAngle = -40f, sweepAngle = 80f, useCenter = false,
-                topLeft = Offset(cx - rad, cy - rad), size = Size(rad * 2, rad * 2),
-                style = Stroke(w * 0.022f, cap = StrokeCap.Round),
-            )
-        }
+        drawLine(rail, Offset(left + bw * 0.12f, railY), Offset(left + bw * 0.88f, railY), w * 0.022f, StrokeCap.Round)
     }
 }
 

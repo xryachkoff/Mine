@@ -166,7 +166,7 @@ class TripService : LifecycleService() {
         speaker = Speaker(this) { lang -> TripBus.update { it.copy(missingVoices = it.missingVoices + lang) } }
 
         handler.post {
-            trace?.write(TraceRecord.Meta(0.0, net.graph.city, "${Build.MANUFACTURER} ${Build.MODEL} API ${Build.VERSION.SDK_INT}", "0.7.0"))
+            trace?.write(TraceRecord.Meta(0.0, net.graph.city, "${Build.MANUFACTURER} ${Build.MODEL} API ${Build.VERSION.SDK_INT}", "0.7.1"))
             engine = TripEngine(net, listOf("ru", "en"), listener = EngineListener()).also { e ->
                 TripBus.state.value.destination?.let {
                     trace?.write(TraceRecord.Dest(0.0, it))
@@ -217,7 +217,8 @@ class TripService : LifecycleService() {
         speaker?.shutdown()
         engine = null
         if (visited.size >= 2) AutoStart.sync(this) // a finished trip may change which stations count as "mine"
-        TripBus.update { it.copy(running = false, phase = "—", estimate = null, lastSaid = null) }
+        // The destination belongs to this ride: tomorrow's trip starts without yesterday's "home".
+        TripBus.update { it.copy(running = false, phase = "—", estimate = null, lastSaid = null, destination = null) }
         super.onDestroy()
     }
 
@@ -263,6 +264,7 @@ class TripService : LifecycleService() {
         val current = e.current?.takeIf { e.atStationProbability > 0.5 }
         val next = e.next?.takeIf { it.probability >= 0.85 }
         val (title, text) = when {
+            current != null && current.stationId == TripBus.state.value.destination -> name(current.stationId) to "Вы приехали. Хорошего дня!"
             current != null -> name(current.stationId) to (next?.let { "Следующая: ${name(it.stationId)}" } ?: "Направление уточняется")
             next != null -> "→ ${name(next.stationId)}" to "В пути"
             e.outside -> "Вы вышли из метро" to "Поездка скоро завершится сама"

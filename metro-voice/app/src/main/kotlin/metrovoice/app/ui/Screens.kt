@@ -303,7 +303,9 @@ fun TripScreen(
     val searching = !outside && e?.current == null && next == null
     val lineId = atStation?.lineId ?: next?.lineId
     // Direction of travel as the terminus ahead — shown only when the tracker is sure.
-    val towards = e?.towards?.takeIf { it.probability >= 0.85 && it.lineId == lineId }
+    // Standing at the chosen destination: the ride is over, nothing about what comes next.
+    val arrived = atStation != null && atStation.stationId == state.destination
+    val towards = e?.towards?.takeIf { it.probability >= 0.85 && it.lineId == lineId && !arrived }
     val onTint = p.ink.copy(alpha = 0.72f) // secondary text on a tinted card: muted grey would drop below 4.5:1
     val fallbackLine = lineId ?: network.lines.first().id
 
@@ -366,6 +368,7 @@ fun TripScreen(
                 when {
                     outside -> "ВНЕ МЕТРО"
                     searching -> "ИЩУ СТАНЦИЮ"
+                    arrived -> "ВЫ ПРИЕХАЛИ"
                     atStation != null -> "СТАНЦИЯ"
                     nextKnown != null -> "ЕДЕМ К СТАНЦИИ"
                     else -> "В ПУТИ"
@@ -384,6 +387,7 @@ fun TripScreen(
             )
             when {
                 outside -> Text("Поездка завершится сама через пару минут.", fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
+                arrived -> Text("Это ваша станция. Хорошего дня!", fontSize = 16.sp, modifier = Modifier.padding(top = 8.dp))
                 atStation != null -> {
                     Spacer(Modifier.height(12.dp))
                     if (nextKnown != null) {
@@ -412,7 +416,8 @@ fun TripScreen(
         if (lineId != null) {
             val line = network.line(lineId)
             CardSurface(Modifier.fillMaxWidth().padding(top = 12.dp), padding = PaddingValues(start = 12.dp, end = 16.dp, top = 12.dp, bottom = 8.dp)) {
-                RouteWindow(network, line, atStation?.stationId, next?.stationId, nextKnown != null, state.destination, towards?.stationId)
+                // At the destination nothing is "next": the list only shows where the rider is.
+                RouteWindow(network, line, atStation?.stationId, next?.stationId.takeIf { !arrived }, nextKnown != null, state.destination, towards?.stationId)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = { onOpenLine(line.id) }) { Text("Вся линия") }
                 }

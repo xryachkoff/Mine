@@ -107,6 +107,14 @@ class ScreenshotTest {
         )
     }
 
+    @Test fun arrived() = shot("09b-arrived") {
+        val e = Estimate(
+            0.97, StationBelief("didube", "1", 0.96), StationBelief("ghrmaghele", "1", 0.95), 3,
+            towards = StationBelief("akhmeteli-theatre", "1", 0.95),
+        )
+        Trip(riding.copy(estimate = e))
+    }
+
     @Test fun leftTheMetro() = shot("09-left-the-metro") {
         Trip(riding.copy(estimate = Estimate(0.0, null, null, 0, outside = true)))
     }

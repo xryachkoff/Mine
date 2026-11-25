@@ -203,7 +203,7 @@ object RideEvaluator {
         for (s in spoken) {
             val a = s.announcement
             when (a.kind) {
-                AnnouncementKind.STATION, AnnouncementKind.APPROACHING -> {
+                AnnouncementKind.STATION, AnnouncementKind.APPROACHING, AnnouncementKind.ARRIVED -> {
                     // "Arriving at X" may come up to a minute before the stop; anything else about X is a false station.
                     val early = if (a.kind == AnnouncementKind.APPROACHING) APPROACH_EARLY else EARLY
                     val k = truth.indexOfFirst { it.stationId == a.stationId && s.t >= it.arrive - early && s.t <= it.depart + LATE }

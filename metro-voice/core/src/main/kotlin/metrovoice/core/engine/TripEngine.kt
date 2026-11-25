@@ -66,6 +66,7 @@ class TripEngine(
     /** "Going home / to work": destination may be on another line. Null clears it. */
     fun setDestination(stationId: String?) {
         tracker.setDestination(stationId)
+        announcer.destination = stationId
         publishStanding()
     }
 

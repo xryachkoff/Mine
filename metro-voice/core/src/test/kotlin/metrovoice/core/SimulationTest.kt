@@ -48,6 +48,37 @@ class SimulationTest {
     }
 
     @Test
+    fun atTheDestinationTheRiderHearsGoodbyeNotTheNextStation() {
+        val legs = listOf(metrovoice.core.sim.Leg("1", "liberty-square", "station-square-1"))
+        for (handheld in listOf(false, true)) {
+            val ride = RideSimulator.generate(network, legs, metrovoice.core.sim.SimOptions(handheld = handheld, destination = "station-square-1"))
+            val spoken = metrovoice.core.trace.TraceReplayer
+                .replayRecords(ride.records.asSequence(), network, listOf("en"), "station-square-1").spoken
+            val texts = spoken.map { it.announcement.text }
+            val arrival = ride.truth.last().arrive
+
+            assertTrue("Next station: Station Square-1. This is your stop." in texts, "handheld=$handheld $texts")
+            assertEquals(1, texts.count { it == "You have arrived. Have a great day!" }, "handheld=$handheld $texts")
+            // Nothing about the station after the destination, and no transfer advice either.
+            assertTrue(texts.none { "Nadzaledevi" in it }, "handheld=$handheld $texts")
+            assertTrue(spoken.none { it.t > arrival - 30 && "Change here" in it.announcement.text }, "handheld=$handheld $texts")
+            assertEquals(texts.last(), "You have arrived. Have a great day!", "the goodbye is the last word: $texts")
+        }
+    }
+
+    @Test
+    fun destinationEqualToTheEntryStationIsNotAnArrival() {
+        val tr = metrovoice.core.engine.TripEngine(network, listOf("en"), listener = object : metrovoice.core.engine.TripEngine.Listener {
+            override fun onAnnouncements(announcements: List<metrovoice.core.announce.Announcement>) {
+                assertTrue(announcements.none { it.kind == metrovoice.core.announce.AnnouncementKind.ARRIVED }, announcements.toString())
+            }
+        })
+        tr.setDestination("didube") // yesterday's "home" still selected while entering the metro at home
+        val s = network.station("didube")
+        tr.onLocation(1.0, s.lat, s.lon, 30.0)
+    }
+
+    @Test
     fun standingAtAStationNeverRevealsDirection() {
         // First real ride: 50 near-identical fixes at the entrance, then a departure, and the app
         // claimed to know the direction before the train had gone anywhere.
