@@ -101,7 +101,7 @@ class TraceTest {
         val result = TraceReplayer.replay(lines.asSequence(), Fixtures.network, listOf("en"))
         assertEquals(live.map { it.text }, result.spoken.map { it.announcement.text })
         assertEquals(listOf("A1", "A2"), result.labels.map { it.stationId })
-        assertTrue(live.any { it.text == "Bravo." }, live.toString())
+        assertTrue(live.any { it.text == "Arriving at Bravo." }, live.toString())
     }
 }
 

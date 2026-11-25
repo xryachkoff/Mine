@@ -28,6 +28,9 @@ data class Hypothesis(
 
 data class StationBelief(val stationId: String, val lineId: String, val probability: Double)
 
+/** The train is in a segment and heading to [stationId]; [remainingSeconds] of moving time are left by the timetable estimate. */
+data class Approach(val stationId: String, val lineId: String, val probability: Double, val remainingSeconds: Double)
+
 data class Estimate(
     /** Probability that the train is standing at a station (vs. in a tunnel). */
     val atStationProbability: Double,
@@ -101,6 +104,11 @@ class Tracker(
         val walkingSpeedMps: Double = 4.0,
         /** A fix this recent can veto an "arrived at station" conclusion drawn from motion alone. */
         val fixVetoSeconds: Double = 10.0,
+        /**
+         * A fix at the station the train "left", this recently, blocks "arriving at the next one":
+         * the rider may have got off and be walking to the exit (escalators look like a departure).
+         */
+        val approachVetoSeconds: Double = 20.0,
         /** Fixes this close to the previous one, this soon after it, are the same evidence repeated. */
         val sameFixMeters: Double = 30.0,
         val sameFixSeconds: Double = 30.0,
@@ -111,12 +119,15 @@ class Tracker(
     private var hypotheses: List<Hypothesis> = emptyList()
     private var lastFix: Triple<Double, Double, Double>? = null
 
-    private class FixObs(val lat: Double, val lon: Double, val sigma: Double, val t: Double?)
+    private class FixObs(val lat: Double, val lon: Double, val sigma: Double, val t: Double?, val accuracy: Double)
     /** Last fix that updated the beliefs / last fix received at all. */
     private var processedFix: FixObs? = null
     private var recentFix: FixObs? = null
     /** First of the current run of fixes away from every station. */
     private var farSince: FixObs? = null
+
+    /** When the current "ride" began, for spotting departures that never were. */
+    private var departedAt: Double? = null
 
     /** True after the rider walked out of the metro; cleared by a fix at a station or a tap. */
     var outside: Boolean = false
@@ -187,7 +198,7 @@ class Tracker(
      */
     fun onFix(lat: Double, lon: Double, accuracyMeters: Double, atSeconds: Double? = null) {
         val sigma = max(accuracyMeters, config.minFixSigmaMeters)
-        val obs = FixObs(lat, lon, sigma, atSeconds)
+        val obs = FixObs(lat, lon, sigma, atSeconds, accuracyMeters)
         recentFix = obs
         if (detectLeaving(obs, accuracyMeters)) return
 
@@ -217,7 +228,7 @@ class Tracker(
             return
         }
         val fresh = seedFromFix(lat, lon, sigma).map(::applyDestination)
-        val updated = hypotheses.flatMap { fixBranches(it, lat, lon, sigma) }
+        val updated = hypotheses.flatMap { fixBranches(it, lat, lon, sigma, atSeconds) }
         val reseed = fresh.map { it.copy(weight = it.weight * config.reseedMass) }
         hypotheses = normalize(merge(updated + reseed))
     }
@@ -246,7 +257,7 @@ class Tracker(
         return true
     }
 
-    private fun fixBranches(h: Hypothesis, lat: Double, lon: Double, sigma: Double): List<Hypothesis> {
+    private fun fixBranches(h: Hypothesis, lat: Double, lon: Double, sigma: Double, atSeconds: Double?): List<Hypothesis> {
         val out = mutableListOf<Hypothesis>()
         fun jumpsFrom(startIndex: Int, direction: Int, firstPrior: Double) {
             var prior = firstPrior
@@ -280,8 +291,14 @@ class Tracker(
                 // "at the station it points to" — e.g. when another line's station lies next to the tunnel.
                 val tunnel = minOf(1.0, 2.5 * sigma / distanceMeters(a.lat, a.lon, b.lat, b.lon)) * config.tunnelFixPrior
                 val along = nearStart * gauss(dStart, sigma) + (1 - nearStart) * onSegment * tunnel
+                // Long after the "departure" and still at the origin station: there was no departure
+                // (the rider got off, or the detector mistook an escalator for a train). Back to the station.
+                val since = departedAt
+                val expected = network.expectedSeconds(h.lineId, p.from, p.to)
+                val neverLeft = since != null && atSeconds != null && atSeconds - since > 2 * expected + 60 && nearStart > 0.5
+                if (neverLeft) out += h.copy(position = Position.At(p.from), weight = h.weight * gauss(dStart, sigma), movingSeconds = 0.0)
                 // "Still in the tunnel" only if the fix is clearly short of the end station (2 sigma zone around it).
-                out += h.copy(weight = h.weight * (along * (1 - gauss(dEnd, 2 * sigma)) + config.fixOutlier))
+                out += h.copy(weight = h.weight * (along * (1 - gauss(dEnd, 2 * sigma)) * (if (neverLeft) 0.05 else 1.0) + config.fixOutlier))
                 if (atEnd > 1e-6) out += h.copy(position = Position.At(p.to), weight = h.weight * config.arriveOnFix * atEnd, movingSeconds = 0.0)
                 jumpsFrom(p.to, h.direction, config.arriveOnFix * config.missedMove)
             }
@@ -290,7 +307,8 @@ class Tracker(
     }
 
     /** Train started moving. */
-    fun onDeparture() {
+    fun onDeparture(atSeconds: Double? = null) {
+        departedAt = atSeconds
         val next = hypotheses.flatMap { h ->
             when (val p = h.position) {
                 is Position.Between -> listOf(h) // resuming after a tunnel stop
@@ -350,6 +368,31 @@ class Tracker(
             }
         }
         hypotheses = normalize(merge(next))
+    }
+
+    /**
+     * Where the train is heading right now and how long is left, given it has been moving for
+     * [movingForSeconds] since the last departure or tunnel stop. Null when no segment dominates.
+     */
+    fun approach(movingForSeconds: Double, atSeconds: Double? = null): Approach? {
+        val best = hypotheses.mapNotNull { h -> (h.position as? Position.Between)?.let { h to it } }
+            .groupBy { (h, p) -> h.lineId to p.to }
+            .maxByOrNull { (_, group) -> group.sumOf { it.first.weight } } ?: return null
+        val (lineId, to) = best.key
+        val group = best.value
+        // Still getting fixes at the station we supposedly left: not a ride.
+        val fix = recentFix
+        if (fix != null && atSeconds != null && fix.t != null && atSeconds - fix.t <= config.approachVetoSeconds) {
+            val stillAtOrigin = group.any { (_, p) ->
+                distToStation(lineId, p.from, fix.lat, fix.lon) <= config.stationZoneMeters + 2 * fix.accuracy
+            }
+            if (stillAtOrigin) return null
+        }
+        val weight = group.sumOf { it.first.weight }
+        val remaining = group.sumOf { (h, p) ->
+            h.weight * (network.expectedSeconds(lineId, p.from, p.to) - h.movingSeconds - movingForSeconds)
+        } / weight
+        return Approach(network.line(lineId).stations[to], lineId, weight, remaining)
     }
 
     fun estimate(): Estimate {

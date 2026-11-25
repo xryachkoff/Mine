@@ -41,6 +41,12 @@ data class SimOptions(
      * where this produced an announcement of a station the rider never reached.
      */
     val leavesAndForgetsToStop: Boolean = false,
+    /**
+     * After the last station the rider gets off and takes a long escalator: train-like vibration for a
+     * couple of minutes, with accurate fixes at the same station all along. Also from the first real
+     * ride: this must not be read as "left for the next station".
+     */
+    val getsOffAndLingers: Boolean = false,
 )
 
 /** Ground truth: the train stood at [stationId] from [arrive] to [depart]; [nextStationId] comes after it. */
@@ -134,6 +140,15 @@ object RideSimulator {
                 dwell(stations[i], leg.lineId, next, withFix = rnd.nextDouble() < options.fixProbability)
             }
         }
+        if (options.getsOffAndLingers) {
+            val exit = network.station(truth.last().stationId)
+            acc(20.0, WALK_SD)
+            repeat(30) { i ->
+                acc(6.0, RIDE_SD)
+                records += TraceRecord.Loc(r4(t), exit.lat + (20.0 + i) / 111_320.0, exit.lon, 20.0, "sim")
+            }
+            acc(20.0, WALK_SD)
+        }
         if (options.leavesAndForgetsToStop) {
             val exit = network.station(truth.last().stationId)
             fun gps(metersNorth: Double) {
@@ -171,6 +186,7 @@ data class Score(
 object RideEvaluator {
     private const val EARLY = 30.0
     private const val LATE = 15.0
+    private const val APPROACH_EARLY = 60.0
 
     /** Runs the engine over the simulated ride (ground-truth labels are not fed in) and scores what it said. */
     fun run(network: MetroNetwork, ride: SimulatedRide): Score {
@@ -187,8 +203,10 @@ object RideEvaluator {
         for (s in spoken) {
             val a = s.announcement
             when (a.kind) {
-                AnnouncementKind.STATION -> {
-                    val k = truth.indexOfFirst { it.stationId == a.stationId && s.t >= it.arrive - EARLY && s.t <= it.depart + LATE }
+                AnnouncementKind.STATION, AnnouncementKind.APPROACHING -> {
+                    // "Arriving at X" may come up to a minute before the stop; anything else about X is a false station.
+                    val early = if (a.kind == AnnouncementKind.APPROACHING) APPROACH_EARLY else EARLY
+                    val k = truth.indexOfFirst { it.stationId == a.stationId && s.t >= it.arrive - early && s.t <= it.depart + LATE }
                     if (k < 0) falseStations++ else if (hit.add(k)) latencies += s.t - truth[k].arrive
                 }
                 AnnouncementKind.NEXT_STATION -> {
@@ -225,6 +243,7 @@ object Scenarios {
             Scenario("transfer line 1 → 2", transfer, SimOptions(), "walking transfer at Station Square"),
             Scenario("transfer, in hand", transfer, SimOptions(handheld = true), "transfer without motion detection"),
             Scenario("left the metro, trip left running", listOf(Leg("1", "liberty-square", "marjanishvili")), SimOptions(leavesAndForgetsToStop = true), "street noise must not become a station"),
+            Scenario("got off, long escalator at the station", listOf(Leg("1", "liberty-square", "marjanishvili")), SimOptions(getsOffAndLingers = true), "an escalator is not a departure"),
             Scenario("pocket, no fixes, destination set", line1, SimOptions(fixProbability = 0.0, destination = "nadzaledevi"), "dead reckoning on estimated times"),
             Scenario("pocket, no fixes, trains 25% faster", line1, SimOptions(fixProbability = 0.0, destination = "nadzaledevi", speedFactor = 0.75), "estimated times are wrong"),
             Scenario("in hand, no fixes", line1, SimOptions(handheld = true, fixProbability = 0.0, destination = "nadzaledevi"), "nothing to go on: must stay silent"),

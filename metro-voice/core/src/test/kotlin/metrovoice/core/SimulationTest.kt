@@ -37,6 +37,7 @@ class SimulationTest {
             "transfer line 1 → 2",
             "transfer, in hand",
             "left the metro, trip left running",
+            "got off, long escalator at the station",
             "pocket, no fixes, destination set",
         )
         for (name in mustBeComplete) {

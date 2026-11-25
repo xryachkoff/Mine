@@ -49,6 +49,6 @@ class TbilisiDataTest {
         assertEquals("Станция Руставели.", texts.first())
         assertTrue("Станция Площадь Свободы." in texts, texts.toString())
         assertTrue("Следующая станция — Авлабари." in texts, texts.toString())
-        assertTrue("Станция Авлабари." in texts, texts.toString())
+        assertTrue("Подъезжаем к станции Авлабари." in texts, texts.toString())
     }
 }

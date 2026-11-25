@@ -179,8 +179,10 @@ class EngineTest {
         assertTrue(ru.any { it.kind == AnnouncementKind.DIRECTION_UNKNOWN })
         assertTrue("Станция Центральная. Пересадка: Линия Б." in texts, texts.toString())
         assertTrue("Следующая станция — Дельта." in texts, texts.toString())
-        assertTrue("Станция Дельта." in texts, texts.toString())
-        val stationOrder = ru.filter { it.kind == AnnouncementKind.STATION }.map { it.stationId }
+        // The third station is announced ahead of the stop, and then not repeated on arrival.
+        assertTrue("Подъезжаем к станции Дельта." in texts, texts.toString())
+        assertTrue("Станция Дельта." !in texts, texts.toString())
+        val stationOrder = ru.filter { it.kind == AnnouncementKind.STATION || it.kind == AnnouncementKind.APPROACHING }.map { it.stationId }
         assertEquals(listOf("A2", "A3", "A4"), stationOrder, "no false or repeated stations")
 
         val en = rec.said.filter { it.language == "en" }.map { it.text }

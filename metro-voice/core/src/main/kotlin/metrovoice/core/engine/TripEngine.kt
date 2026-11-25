@@ -33,10 +33,20 @@ class TripEngine(
     private var movingSince: Double? = null
     private var movedInSegment = 0.0
 
+    private var lastApproachCheck = 0.0
+
     fun onAccelerometer(tSeconds: Double, x: Double, y: Double, z: Double) {
-        val change = detector.onSample(tSeconds, x, y, z) ?: return
-        listener.onPhase(change)
-        handlePhase(change)
+        val change = detector.onSample(tSeconds, x, y, z)
+        if (change != null) {
+            listener.onPhase(change)
+            handlePhase(change)
+        }
+        // Once a second while riding: are we close enough to the next station to say so?
+        val since = movingSince
+        if (since != null && detector.phase == Phase.MOVING && tSeconds - lastApproachCheck >= 1.0) {
+            lastApproachCheck = tSeconds
+            emit(announcer.onApproach(tracker.approach(movingForSeconds = tSeconds - since, atSeconds = tSeconds)))
+        }
     }
 
     fun onLocation(tSeconds: Double, lat: Double, lon: Double, accuracyMeters: Double) {
@@ -78,7 +88,7 @@ class TripEngine(
                 // A departure from a station resets the segment clock; resuming after a tunnel stop does not.
                 if (change.previous == Phase.STOPPED || change.previous == Phase.WALKING) {
                     movingSince = t
-                    tracker.onDeparture()
+                    tracker.onDeparture(t)
                     emit(announcer.onDeparture(tracker.estimate()))
                 }
             }
